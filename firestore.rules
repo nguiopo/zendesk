@@ -1,0 +1,1186 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerified() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerified() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'camillenguiopo@gmail.com'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isWorkspaceMember(data) {
+      return data.ownerId == request.auth.uid ||
+        (data.memberIds is list && request.auth.uid in data.memberIds);
+    }
+
+    function isValidMemberIds(listData) {
+      return listData is list &&
+        listData.size() >= 1 &&
+        listData.size() <= 20 &&
+        listData[0] is string &&
+        listData[0].size() <= 128;
+    }
+
+    function isValidTags(listData) {
+      return listData is list &&
+        listData.size() <= 10 &&
+        (listData.size() == 0 || (listData[0] is string && listData[0].size() <= 40));
+    }
+
+    // --- Entity Validation Blueprints ---
+    function isValidUserPublicProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'department', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'role', 'department', 'avatarUrl', 'themeMode', 'preferredLocale', 'updatedAt']) &&
+        data.uid is string && data.uid == userId && data.uid.size() <= 128 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.role in ['admin', 'supervisor', 'agent'] &&
+        data.department is string && data.department.size() >= 1 && data.department.size() <= 80 &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+        (!('themeMode' in data) || data.themeMode in ['light', 'dark', 'system', 'schedule']) &&
+        (!('preferredLocale' in data) || data.preferredLocale in ['fr', 'en', 'es']) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidUserPrivateInfo(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid == userId && data.uid.size() <= 128 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidSupportAgent(data) {
+      return data.keys().hasAll([
+          'name', 'roleTitle', 'group', 'availability', 'maxConcurrentTickets',
+          'activeTickets', 'callsHandled', 'avgCallDurationSec', 'situationChecks',
+          'platformUsageScore', 'clientAssistanceCount', 'passwordUnlocksCount',
+          'outOfZoneFollowups', 'slaCompliancePct', 'csatScore', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'roleTitle', 'group', 'avatarUrl', 'availability', 'maxConcurrentTickets',
+          'activeTickets', 'callsHandled', 'avgCallDurationSec', 'situationChecks',
+          'platformUsageScore', 'clientAssistanceCount', 'passwordUnlocksCount',
+          'outOfZoneFollowups', 'slaCompliancePct', 'csatScore', 'skills', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.roleTitle is string && data.roleTitle.size() >= 1 && data.roleTitle.size() <= 120 &&
+        data.group in ['N1 Accès & Comptes', 'N2 Plateforme', 'N3 Infrastructure', 'Relation Client & CTI'] &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+        data.availability in ['available', 'busy', 'on_call', 'in_call', 'off_duty'] &&
+        data.maxConcurrentTickets is int && data.maxConcurrentTickets >= 1 && data.maxConcurrentTickets <= 100 &&
+        data.activeTickets is int && data.activeTickets >= 0 && data.activeTickets <= 500 &&
+        data.callsHandled is int && data.callsHandled >= 0 &&
+        data.avgCallDurationSec is int && data.avgCallDurationSec >= 0 &&
+        data.situationChecks is int && data.situationChecks >= 0 &&
+        data.platformUsageScore is int && data.platformUsageScore >= 0 && data.platformUsageScore <= 100 &&
+        data.clientAssistanceCount is int && data.clientAssistanceCount >= 0 &&
+        data.passwordUnlocksCount is int && data.passwordUnlocksCount >= 0 &&
+        data.outOfZoneFollowups is int && data.outOfZoneFollowups >= 0 &&
+        data.slaCompliancePct is number && data.slaCompliancePct >= 0 && data.slaCompliancePct <= 100 &&
+        data.csatScore is number && data.csatScore >= 0 && data.csatScore <= 5 &&
+        (!('skills' in data) || (data.skills is string && data.skills.size() <= 300)) &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidClientAccount(data) {
+      return data.keys().hasAll([
+          'companyName', 'contactName', 'contactEmail', 'contactPhone', 'region',
+          'tier', 'healthStatus', 'platformAdoptionPct', 'passwordLocked',
+          'outOfZoneSignal', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'companyName', 'contactName', 'contactEmail', 'contactPhone', 'region',
+          'tier', 'healthStatus', 'platformAdoptionPct', 'passwordLocked',
+          'outOfZoneSignal', 'lastVerifiedNote', 'lastVerifiedAt', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.companyName is string && data.companyName.size() >= 1 && data.companyName.size() <= 150 &&
+        data.contactName is string && data.contactName.size() >= 1 && data.contactName.size() <= 120 &&
+        data.contactEmail is string && data.contactEmail.size() >= 3 && data.contactEmail.size() <= 200 &&
+        data.contactPhone is string && data.contactPhone.size() >= 3 && data.contactPhone.size() <= 40 &&
+        data.region is string && data.region.size() >= 1 && data.region.size() <= 80 &&
+        data.tier in ['Enterprise VIP', 'Business', 'Standard'] &&
+        data.healthStatus in ['nominal', 'degraded', 'out_of_zone', 'password_locked', 'critical'] &&
+        data.platformAdoptionPct is int && data.platformAdoptionPct >= 0 && data.platformAdoptionPct <= 100 &&
+        data.passwordLocked is bool &&
+        data.outOfZoneSignal is bool &&
+        (!('lastVerifiedNote' in data) || (data.lastVerifiedNote is string && data.lastVerifiedNote.size() <= 500)) &&
+        (!('lastVerifiedAt' in data) || (data.lastVerifiedAt is string && data.lastVerifiedAt.size() <= 64)) &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidSlaPolicy(data) {
+      return data.keys().hasAll([
+          'name', 'priorityScope', 'firstResponseMinutes', 'updateMinutes',
+          'resolutionMinutes', 'escalationGroup', 'active', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'priorityScope', 'firstResponseMinutes', 'updateMinutes',
+          'resolutionMinutes', 'escalationGroup', 'active', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.priorityScope in ['critical', 'high', 'medium', 'low'] &&
+        data.firstResponseMinutes is int && data.firstResponseMinutes >= 1 && data.firstResponseMinutes <= 10080 &&
+        data.updateMinutes is int && data.updateMinutes >= 1 && data.updateMinutes <= 10080 &&
+        data.resolutionMinutes is int && data.resolutionMinutes >= 1 && data.resolutionMinutes <= 43200 &&
+        data.escalationGroup is string && data.escalationGroup.size() >= 1 && data.escalationGroup.size() <= 100 &&
+        data.active is bool &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidTicket(data) {
+      return data.keys().hasAll([
+          'reference', 'subject', 'description', 'channel', 'status', 'priority',
+          'category', 'clientId', 'clientName', 'assignedGroup',
+          'firstResponseDueMs', 'resolutionDueMs', 'firstResponded', 'aiRouted',
+          'isRecurringIncident', 'tags', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'reference', 'subject', 'description', 'channel', 'status', 'priority',
+          'category', 'clientId', 'clientName', 'assignedAgentId', 'assignedAgentName',
+          'assignedGroup', 'slaPolicyId', 'firstResponseDueMs', 'resolutionDueMs',
+          'snoozedUntilMs', 'firstResponded', 'aiRouted', 'aiConfidence', 'aiSentiment',
+          'aiSummary', 'isRecurringIncident', 'parentIncidentRef', 'mergedIntoRef',
+          'splitFromRef', 'isFavorite', 'tags', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.reference is string && data.reference.size() >= 1 && data.reference.size() <= 40 &&
+        data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 240 &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 4000 &&
+        data.channel in ['email', 'phone', 'chat', 'portal', 'web_form', 'facebook', 'twitter', 'instagram', 'whatsapp', 'slack_teams', 'auto_alert'] &&
+        data.status in ['new', 'open', 'pending_client', 'snoozed', 'escalated', 'resolved', 'closed'] &&
+        data.priority in ['critical', 'high', 'medium', 'low'] &&
+        data.category in [
+          'Mot de passe bloqué', 'Hors zone / Connectivité', 'Utilisation plateforme',
+          'Assistance client', 'Vérification situation', 'Incident infrastructure'
+        ] &&
+        isValidId(data.clientId) &&
+        data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 150 &&
+        (!('assignedAgentId' in data) || (data.assignedAgentId is string && data.assignedAgentId.size() <= 128)) &&
+        (!('assignedAgentName' in data) || (data.assignedAgentName is string && data.assignedAgentName.size() <= 120)) &&
+        data.assignedGroup is string && data.assignedGroup.size() >= 1 && data.assignedGroup.size() <= 100 &&
+        (!('slaPolicyId' in data) || (data.slaPolicyId is string && data.slaPolicyId.size() <= 128)) &&
+        data.firstResponseDueMs is int && data.firstResponseDueMs > 0 &&
+        data.resolutionDueMs is int && data.resolutionDueMs > 0 &&
+        (!('snoozedUntilMs' in data) || (data.snoozedUntilMs is int && data.snoozedUntilMs > 0)) &&
+        data.firstResponded is bool &&
+        data.aiRouted is bool &&
+        (!('aiConfidence' in data) || (data.aiConfidence is number && data.aiConfidence >= 0 && data.aiConfidence <= 1)) &&
+        (!('aiSentiment' in data) || (data.aiSentiment is string && data.aiSentiment.size() <= 60)) &&
+        (!('aiSummary' in data) || (data.aiSummary is string && data.aiSummary.size() <= 600)) &&
+        data.isRecurringIncident is bool &&
+        (!('parentIncidentRef' in data) || (data.parentIncidentRef is string && data.parentIncidentRef.size() <= 40)) &&
+        (!('mergedIntoRef' in data) || (data.mergedIntoRef is string && data.mergedIntoRef.size() <= 40)) &&
+        (!('splitFromRef' in data) || (data.splitFromRef is string && data.splitFromRef.size() <= 40)) &&
+        (!('isFavorite' in data) || (data.isFavorite is bool)) &&
+        isValidTags(data.tags) &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidTicketEvent(data, ticketId) {
+      return data.keys().hasAll([
+          'ticketId', 'authorName', 'authorRole', 'visibility', 'eventType',
+          'body', 'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ticketId', 'authorName', 'authorRole', 'visibility', 'eventType',
+          'body', 'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        data.ticketId is string && data.ticketId == ticketId &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+        data.authorRole in ['agent', 'client', 'system', 'ai'] &&
+        data.visibility in ['public', 'internal'] &&
+        data.eventType in ['reply', 'note', 'status_change', 'ai_triage', 'call_log', 'password_unlock', 'macro', 'merge_split'] &&
+        data.body is string && data.body.size() >= 1 && data.body.size() <= 4000 &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt == request.time;
+    }
+
+    function isValidOnCallShift(data) {
+      return data.keys().hasAll([
+          'agentId', 'agentName', 'specialty', 'dayLabel', 'timeWindow',
+          'status', 'availabilityVerified', 'escalationPhone', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'agentId', 'agentName', 'specialty', 'dayLabel', 'shiftDate', 'timeWindow',
+          'status', 'availabilityVerified', 'escalationPhone', 'notes', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.agentId) &&
+        data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 120 &&
+        data.specialty in ['Infrastructure N3', 'Réseau & Hors Zone', 'Sécurité & Accès', 'Support VIP'] &&
+        data.dayLabel is string && data.dayLabel.size() >= 1 && data.dayLabel.size() <= 60 &&
+        (!('shiftDate' in data) || (data.shiftDate is string && data.shiftDate.size() == 10 && data.shiftDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))) &&
+        data.timeWindow is string && data.timeWindow.size() >= 1 && data.timeWindow.size() <= 60 &&
+        data.status in ['active', 'scheduled', 'standby', 'completed'] &&
+        data.availabilityVerified is bool &&
+        data.escalationPhone is string && data.escalationPhone.size() >= 3 && data.escalationPhone.size() <= 40 &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidAgentLeave(data) {
+      return data.keys().hasAll([
+          'agentId', 'agentName', 'leaveType', 'startDate', 'endDate',
+          'status', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'agentId', 'agentName', 'leaveType', 'startDate', 'endDate',
+          'status', 'notes', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.agentId) &&
+        data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 120 &&
+        data.leaveType in ['Congés payés', 'RTT', 'Formation', 'Arrêt / Absence'] &&
+        data.startDate is string && data.startDate.size() == 10 && data.startDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.endDate is string && data.endDate.size() == 10 && data.endDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.endDate >= data.startDate &&
+        data.status in ['approved', 'pending'] &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 300)) &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidAutomationRule(data) {
+      return data.keys().hasAll([
+          'name', 'triggerCategory', 'conditionPattern', 'actionSummary',
+          'targetGroup', 'autoCreateIncident', 'active', 'triggeredCount',
+          'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'triggerEvent', 'triggerCategory', 'conditionPattern', 'actionSummary',
+          'targetGroup', 'autoCreateIncident', 'active', 'triggeredCount',
+          'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 150 &&
+        (!('triggerEvent' in data) || data.triggerEvent in ['ticket_created', 'client_reply', 'field_changed', 'sla_warning']) &&
+        data.triggerCategory is string && data.triggerCategory.size() >= 1 && data.triggerCategory.size() <= 100 &&
+        data.conditionPattern is string && data.conditionPattern.size() >= 1 && data.conditionPattern.size() <= 300 &&
+        data.actionSummary is string && data.actionSummary.size() >= 1 && data.actionSummary.size() <= 300 &&
+        data.targetGroup is string && data.targetGroup.size() >= 1 && data.targetGroup.size() <= 100 &&
+        data.autoCreateIncident is bool &&
+        data.active is bool &&
+        data.triggeredCount is int && data.triggeredCount >= 0 &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidCallLog(data) {
+      return data.keys().hasAll([
+          'clientId', 'clientName', 'agentId', 'agentName', 'direction',
+          'outcome', 'durationSeconds', 'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'clientId', 'clientName', 'agentId', 'agentName', 'direction',
+          'outcome', 'durationSeconds', 'linkedTicketRef', 'notes',
+          'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        isValidId(data.clientId) &&
+        data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 150 &&
+        isValidId(data.agentId) &&
+        data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 120 &&
+        data.direction in ['inbound', 'outbound'] &&
+        data.outcome in ['answered', 'missed', 'out_of_zone', 'callback_scheduled'] &&
+        data.durationSeconds is int && data.durationSeconds >= 0 && data.durationSeconds <= 86400 &&
+        (!('linkedTicketRef' in data) || (data.linkedTicketRef is string && data.linkedTicketRef.size() <= 40)) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt == request.time;
+    }
+
+    function isValidPermissionsList(listData) {
+      return listData is list &&
+        listData.size() <= 12 &&
+        (listData.size() == 0 || (listData[0] is string && listData[0].size() <= 40));
+    }
+
+    function isValidKbArticle(data) {
+      return data.keys().hasAll([
+          'title', 'summary', 'body', 'category', 'language', 'articleType',
+          'tags', 'published', 'viewsCount', 'deflectionsCount', 'helpfulCount',
+          'authorName', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'summary', 'body', 'category', 'language', 'articleType',
+          'tags', 'published', 'viewsCount', 'deflectionsCount', 'helpfulCount',
+          'authorName', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 500 &&
+        data.body is string && data.body.size() >= 1 && data.body.size() <= 6000 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 100 &&
+        data.language in ['fr', 'en', 'es'] &&
+        data.articleType in ['article', 'faq', 'guide'] &&
+        isValidTags(data.tags) &&
+        data.published is bool &&
+        data.viewsCount is int && data.viewsCount >= 0 &&
+        data.deflectionsCount is int && data.deflectionsCount >= 0 &&
+        data.helpfulCount is int && data.helpfulCount >= 0 &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidForumTopic(data) {
+      return data.keys().hasAll([
+          'title', 'body', 'category', 'language', 'authorName', 'authorCompany',
+          'status', 'upvotes', 'repliesCount', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'body', 'category', 'language', 'authorName', 'authorCompany',
+          'status', 'upvotes', 'repliesCount', 'lastReplyNote', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.body is string && data.body.size() >= 1 && data.body.size() <= 3000 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 100 &&
+        data.language in ['fr', 'en', 'es'] &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+        data.authorCompany is string && data.authorCompany.size() >= 1 && data.authorCompany.size() <= 150 &&
+        data.status in ['open', 'answered', 'pinned'] &&
+        data.upvotes is int && data.upvotes >= 0 &&
+        data.repliesCount is int && data.repliesCount >= 0 &&
+        (!('lastReplyNote' in data) || (data.lastReplyNote is string && data.lastReplyNote.size() <= 600)) &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidCsatSurvey(data) {
+      return data.keys().hasAll([
+          'ticketId', 'ticketRef', 'clientId', 'clientName', 'agentId',
+          'agentName', 'rating', 'comment', 'channel', 'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ticketId', 'ticketRef', 'clientId', 'clientName', 'agentId',
+          'agentName', 'rating', 'comment', 'channel', 'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        isValidId(data.ticketId) &&
+        data.ticketRef is string && data.ticketRef.size() >= 1 && data.ticketRef.size() <= 40 &&
+        isValidId(data.clientId) &&
+        data.clientName is string && data.clientName.size() >= 1 && data.clientName.size() <= 150 &&
+        isValidId(data.agentId) &&
+        data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 120 &&
+        data.rating is int && data.rating >= 1 && data.rating <= 5 &&
+        data.comment is string && data.comment.size() <= 1000 &&
+        data.channel in ['email', 'portal', 'phone'] &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt == request.time;
+    }
+
+    function isValidQaEvaluation(data) {
+      return data.keys().hasAll([
+          'agentId', 'agentName', 'ticketRef', 'reviewerName', 'greetingScore',
+          'diagnosticScore', 'slaComplianceScore', 'toneResolutionScore',
+          'totalScore', 'trainingNeed', 'feedback', 'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'agentId', 'agentName', 'ticketRef', 'reviewerName', 'greetingScore',
+          'diagnosticScore', 'slaComplianceScore', 'toneResolutionScore',
+          'totalScore', 'trainingNeed', 'feedback', 'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        isValidId(data.agentId) &&
+        data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 120 &&
+        data.ticketRef is string && data.ticketRef.size() >= 1 && data.ticketRef.size() <= 40 &&
+        data.reviewerName is string && data.reviewerName.size() >= 1 && data.reviewerName.size() <= 120 &&
+        data.greetingScore is int && data.greetingScore >= 0 && data.greetingScore <= 25 &&
+        data.diagnosticScore is int && data.diagnosticScore >= 0 && data.diagnosticScore <= 25 &&
+        data.slaComplianceScore is int && data.slaComplianceScore >= 0 && data.slaComplianceScore <= 25 &&
+        data.toneResolutionScore is int && data.toneResolutionScore >= 0 && data.toneResolutionScore <= 25 &&
+        data.totalScore is int && data.totalScore >= 0 && data.totalScore <= 100 &&
+        data.trainingNeed is string && data.trainingNeed.size() <= 200 &&
+        data.feedback is string && data.feedback.size() >= 1 && data.feedback.size() <= 1000 &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt == request.time;
+    }
+
+    function isValidWfmShift(data) {
+      return data.keys().hasAll([
+          'agentId', 'agentName', 'shiftDate', 'timeWindow', 'plannedHours',
+          'adherencePct', 'forecastTickets', 'activityType', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'agentId', 'agentName', 'shiftDate', 'timeWindow', 'plannedHours',
+          'adherencePct', 'forecastTickets', 'activityType', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.agentId) &&
+        data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 120 &&
+        data.shiftDate is string && data.shiftDate.size() == 10 && data.shiftDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.timeWindow is string && data.timeWindow.size() >= 1 && data.timeWindow.size() <= 60 &&
+        data.plannedHours is number && data.plannedHours > 0 && data.plannedHours <= 24 &&
+        data.adherencePct is int && data.adherencePct >= 0 && data.adherencePct <= 100 &&
+        data.forecastTickets is int && data.forecastTickets >= 0 && data.forecastTickets <= 1000 &&
+        data.activityType in ['Support N1/N2', 'Téléphonie CTI', 'Astreinte N3', 'Formation / Coaching'] &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidExternalIntegration(data) {
+      return data.keys().hasAll([
+          'kind', 'provider', 'name', 'category', 'eventsSummary',
+          'active', 'syncCount', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'kind', 'provider', 'name', 'category', 'endpointUrl', 'eventsSummary',
+          'active', 'syncCount', 'lastSyncAt', 'lastStatus', 'ownerId',
+          'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.kind in ['marketplace', 'webhook'] &&
+        data.provider is string && data.provider.size() >= 1 && data.provider.size() <= 80 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+        (!('endpointUrl' in data) || (data.endpointUrl is string && data.endpointUrl.size() <= 500 && (data.endpointUrl.size() == 0 || data.endpointUrl.matches('^https?://.*')))) &&
+        data.eventsSummary is string && data.eventsSummary.size() >= 1 && data.eventsSummary.size() <= 300 &&
+        data.active is bool &&
+        data.syncCount is int && data.syncCount >= 0 &&
+        (!('lastSyncAt' in data) || (data.lastSyncAt is string && data.lastSyncAt.size() <= 64)) &&
+        (!('lastStatus' in data) || (data.lastStatus is string && data.lastStatus.size() <= 80)) &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidWorkspaceConfig(data) {
+      return data.keys().hasAll([
+          'defaultLanguage', 'gdprRetentionDays', 'anonymizeClosedAfterDays',
+          'apiKeyPrefix', 'agentPermissions', 'supervisorPermissions',
+          'adminPermissions', 'ownerId', 'memberIds', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'defaultLanguage', 'gdprRetentionDays', 'anonymizeClosedAfterDays',
+          'apiKeyPrefix', 'agentPermissions', 'supervisorPermissions',
+          'adminPermissions', 'smartRoutingEnabled', 'smartRoutingPrioritizeTense',
+          'smartRoutingRespectAvailability', 'smartRoutingMaxLoadPct',
+          'slaAlertThresholdPct', 'ownerId', 'memberIds', 'updatedAt'
+        ]) &&
+        data.defaultLanguage in ['fr', 'en', 'es'] &&
+        data.gdprRetentionDays is int && data.gdprRetentionDays >= 30 && data.gdprRetentionDays <= 3650 &&
+        data.anonymizeClosedAfterDays is int && data.anonymizeClosedAfterDays >= 30 && data.anonymizeClosedAfterDays <= 3650 &&
+        data.apiKeyPrefix is string && data.apiKeyPrefix.size() >= 1 && data.apiKeyPrefix.size() <= 40 &&
+        isValidPermissionsList(data.agentPermissions) &&
+        isValidPermissionsList(data.supervisorPermissions) &&
+        isValidPermissionsList(data.adminPermissions) &&
+        (!('smartRoutingEnabled' in data) || data.smartRoutingEnabled is bool) &&
+        (!('smartRoutingPrioritizeTense' in data) || data.smartRoutingPrioritizeTense is bool) &&
+        (!('smartRoutingRespectAvailability' in data) || data.smartRoutingRespectAvailability is bool) &&
+        (!('smartRoutingMaxLoadPct' in data) || (data.smartRoutingMaxLoadPct is int && data.smartRoutingMaxLoadPct >= 50 && data.smartRoutingMaxLoadPct <= 100)) &&
+        (!('slaAlertThresholdPct' in data) || (data.slaAlertThresholdPct is int && data.slaAlertThresholdPct >= 50 && data.slaAlertThresholdPct <= 100)) &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidAuditLogEntry(data) {
+      return data.keys().hasAll([
+          'actorName', 'actorRole', 'action', 'category', 'targetLabel',
+          'details', 'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'actorName', 'actorRole', 'action', 'category', 'targetLabel',
+          'details', 'ownerId', 'memberIds', 'createdAt'
+        ]) &&
+        data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 120 &&
+        data.actorRole in ['admin', 'supervisor', 'agent'] &&
+        data.action is string && data.action.size() >= 1 && data.action.size() <= 120 &&
+        data.category in ['rgpd', 'rbac', 'webhook', 'integration', 'qa', 'kb'] &&
+        data.targetLabel is string && data.targetLabel.size() >= 1 && data.targetLabel.size() <= 180 &&
+        data.details is string && data.details.size() >= 1 && data.details.size() <= 500 &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt == request.time;
+    }
+
+    function isValidChartAnnotation(data) {
+      return data.keys().hasAll([
+          'title', 'color', 'categoryLabel', 'targetChart', 'anchorLabel',
+          'positionPct', 'eventDate', 'authorName', 'ownerId', 'memberIds',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'notes', 'color', 'categoryLabel', 'targetChart', 'anchorLabel',
+          'positionPct', 'eventDate', 'authorName', 'ownerId', 'memberIds',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
+        data.color in ['red', 'amber', 'blue', 'emerald', 'violet'] &&
+        data.categoryLabel in ['Incident majeur', 'Pic hors zone', 'Maintenance / Déploiement', 'Jalon SLA', 'Événement équipe'] &&
+        data.targetChart in ['operations_timeline', 'capacity_bars', 'client_health_donut'] &&
+        data.anchorLabel is string && data.anchorLabel.size() >= 1 && data.anchorLabel.size() <= 120 &&
+        data.positionPct is int && data.positionPct >= 0 && data.positionPct <= 100 &&
+        data.eventDate is string && data.eventDate.size() == 10 && data.eventDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidOnCallReport(data) {
+      return data.keys().hasAll([
+          'shiftLabel', 'agentName', 'entryType', 'severity', 'title', 'details',
+          'timeSpentMinutes', 'handoverRequired', 'status', 'occurredAtLabel',
+          'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'shiftId', 'shiftLabel', 'agentName', 'entryType', 'severity', 'ticketRef',
+          'title', 'details', 'problemsEncountered', 'resolutionSteps',
+          'timeSpentMinutes', 'handoverRequired', 'status',
+          'occurredAtLabel', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        (!('shiftId' in data) || (data.shiftId is string && data.shiftId.size() <= 128)) &&
+        data.shiftLabel is string && data.shiftLabel.size() >= 1 && data.shiftLabel.size() <= 120 &&
+        data.agentName is string && data.agentName.size() >= 1 && data.agentName.size() <= 120 &&
+        data.entryType in ['incident', 'action', 'escalation', 'handover', 'resolved'] &&
+        data.severity in ['info', 'warning', 'critical'] &&
+        (!('ticketRef' in data) || (data.ticketRef is string && data.ticketRef.size() <= 40)) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+        data.details is string && data.details.size() >= 1 && data.details.size() <= 2000 &&
+        (!('problemsEncountered' in data) || (data.problemsEncountered is string && data.problemsEncountered.size() <= 2000)) &&
+        (!('resolutionSteps' in data) || (data.resolutionSteps is string && data.resolutionSteps.size() <= 2000)) &&
+        data.timeSpentMinutes is int && data.timeSpentMinutes >= 0 && data.timeSpentMinutes <= 1440 &&
+        data.handoverRequired is bool &&
+        data.status in ['open', 'resolved', 'handed_over'] &&
+        data.occurredAtLabel is string && data.occurredAtLabel.size() >= 1 && data.occurredAtLabel.size() <= 40 &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidKbPdfDocument(data) {
+      return data.keys().hasAll([
+          'title', 'fileName', 'fileSizeBytes', 'pageCount', 'category', 'language',
+          'tags', 'extractedText', 'agentNotes', 'readingProgressPct', 'lastReadPage',
+          'kbContributionStatus', 'uploadedBy', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'fileName', 'fileSizeBytes', 'pageCount', 'category', 'language',
+          'tags', 'extractedText', 'agentNotes', 'readingProgressPct', 'lastReadPage',
+          'kbContributionStatus', 'linkedKbArticleId', 'linkedKbArticleTitle',
+          'uploadedBy', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 240 &&
+        data.fileSizeBytes is int && data.fileSizeBytes >= 0 && data.fileSizeBytes <= 52428800 &&
+        data.pageCount is int && data.pageCount >= 1 && data.pageCount <= 5000 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 100 &&
+        data.language in ['fr', 'en', 'es'] &&
+        isValidTags(data.tags) &&
+        data.extractedText is string && data.extractedText.size() >= 1 && data.extractedText.size() <= 35000 &&
+        data.agentNotes is string && data.agentNotes.size() <= 4000 &&
+        data.readingProgressPct is int && data.readingProgressPct >= 0 && data.readingProgressPct <= 100 &&
+        data.lastReadPage is int && data.lastReadPage >= 1 && data.lastReadPage <= 5000 &&
+        data.kbContributionStatus in ['to_review', 'drafting', 'integrated'] &&
+        (!('linkedKbArticleId' in data) || (data.linkedKbArticleId is string && data.linkedKbArticleId.size() <= 128)) &&
+        (!('linkedKbArticleTitle' in data) || (data.linkedKbArticleTitle is string && data.linkedKbArticleTitle.size() <= 200)) &&
+        data.uploadedBy is string && data.uploadedBy.size() >= 1 && data.uploadedBy.size() <= 120 &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    function isValidCriticalTicketRefs(listData) {
+      return listData is list &&
+        listData.size() <= 20 &&
+        (listData.size() == 0 || (listData[0] is string && listData[0].size() <= 40));
+    }
+
+    function isValidWeeklyReport(data) {
+      return data.keys().hasAll([
+          'weekKey', 'weekLabel', 'rangeLabel', 'generationMode', 'totalTickets',
+          'resolvedTickets', 'openTickets', 'escalatedTickets', 'criticalTicketsCount',
+          'slaBreachedCount', 'slaCompliancePct', 'avgResponseMinutes', 'avgCsatScore',
+          'criticalTicketRefs', 'highlights', 'generatedBy', 'ownerId', 'memberIds',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'weekKey', 'weekLabel', 'rangeLabel', 'generationMode', 'totalTickets',
+          'resolvedTickets', 'openTickets', 'escalatedTickets', 'criticalTicketsCount',
+          'slaBreachedCount', 'slaCompliancePct', 'avgResponseMinutes', 'avgCsatScore',
+          'criticalTicketRefs', 'highlights', 'generatedBy', 'ownerId', 'memberIds',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.weekKey is string && data.weekKey.size() >= 7 && data.weekKey.size() <= 10 &&
+        data.weekKey.matches('^[0-9]{4}-W[0-9]{2}$') &&
+        data.weekLabel is string && data.weekLabel.size() >= 1 && data.weekLabel.size() <= 120 &&
+        data.rangeLabel is string && data.rangeLabel.size() >= 1 && data.rangeLabel.size() <= 80 &&
+        data.generationMode in ['auto', 'manual'] &&
+        data.totalTickets is int && data.totalTickets >= 0 && data.totalTickets <= 100000 &&
+        data.resolvedTickets is int && data.resolvedTickets >= 0 && data.resolvedTickets <= 100000 &&
+        data.openTickets is int && data.openTickets >= 0 && data.openTickets <= 100000 &&
+        data.escalatedTickets is int && data.escalatedTickets >= 0 && data.escalatedTickets <= 100000 &&
+        data.criticalTicketsCount is int && data.criticalTicketsCount >= 0 && data.criticalTicketsCount <= 100000 &&
+        data.slaBreachedCount is int && data.slaBreachedCount >= 0 && data.slaBreachedCount <= 100000 &&
+        data.slaCompliancePct is int && data.slaCompliancePct >= 0 && data.slaCompliancePct <= 100 &&
+        data.avgResponseMinutes is int && data.avgResponseMinutes >= 0 && data.avgResponseMinutes <= 100000 &&
+        data.avgCsatScore is string && data.avgCsatScore.size() >= 1 && data.avgCsatScore.size() <= 16 &&
+        isValidCriticalTicketRefs(data.criticalTicketRefs) &&
+        data.highlights is string && data.highlights.size() <= 1200 &&
+        data.generatedBy is string && data.generatedBy.size() >= 1 && data.generatedBy.size() <= 120 &&
+        isValidId(data.ownerId) &&
+        isValidMemberIds(data.memberIds) &&
+        data.createdAt is timestamp &&
+        data.updatedAt == request.time;
+    }
+
+    // --- Collection Rules ---
+
+    // Health check document
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    // Admins registry
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow write: if false;
+    }
+
+    // Users Split Collection (PII Isolation)
+    match /users/{userId}/public/profile {
+      allow get: if isValidId(userId) && isVerified();
+      allow create: if isValidId(userId) && isOwner(userId) &&
+        isValidUserPublicProfile(incoming(), userId) &&
+        (incoming().role != 'admin' || isAdmin());
+      allow update: if isValidId(userId) &&
+        isValidUserPublicProfile(incoming(), userId) && (
+          isAdmin() ||
+          (isOwner(userId) &&
+            incoming().uid == existing().uid &&
+            incoming().role == existing().role &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'department', 'avatarUrl', 'themeMode', 'preferredLocale', 'updatedAt']))
+        );
+    }
+
+    match /users/{userId}/private/info {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow create: if isValidId(userId) && isOwner(userId) &&
+        isValidUserPrivateInfo(incoming(), userId) &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(userId) && (isOwner(userId) || isAdmin()) &&
+        isValidUserPrivateInfo(incoming(), userId) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().uid == existing().uid &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
+    }
+
+    // Support Agents
+    match /agents/{agentId} {
+      allow get: if isValidId(agentId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(agentId) && isVerified() &&
+        isValidSupportAgent(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(agentId) && isVerified() &&
+        isValidSupportAgent(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'availability', 'activeTickets', 'callsHandled', 'avgCallDurationSec',
+            'situationChecks', 'platformUsageScore', 'clientAssistanceCount',
+            'passwordUnlocksCount', 'outOfZoneFollowups', 'slaCompliancePct',
+            'csatScore', 'skills', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(agentId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Client Accounts
+    match /clients/{clientId} {
+      allow get: if isValidId(clientId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isValidId(clientId) && isVerified() &&
+        isValidClientAccount(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(clientId) && isVerified() &&
+        isValidClientAccount(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+            'contactName', 'contactEmail', 'contactPhone',
+            'healthStatus', 'platformAdoptionPct', 'passwordLocked', 'outOfZoneSignal',
+            'lastVerifiedNote', 'lastVerifiedAt', 'tier', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(clientId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // SLA Policies
+    match /slaPolicies/{policyId} {
+      allow get: if isValidId(policyId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(policyId) && isVerified() &&
+        isValidSlaPolicy(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(policyId) && isVerified() &&
+        isValidSlaPolicy(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'priorityScope', 'firstResponseMinutes', 'updateMinutes',
+            'resolutionMinutes', 'escalationGroup', 'active', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(policyId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Tickets
+    match /tickets/{ticketId} {
+      allow get: if isValidId(ticketId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(ticketId) && isVerified() &&
+        isValidTicket(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/clients/$(incoming().clientId));
+      allow update: if isValidId(ticketId) && isVerified() &&
+        isValidTicket(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          // Action: Toggle Favorite Star
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'isFavorite', 'updatedAt'
+          ])) ||
+          (existing().status != 'closed' && isWorkspaceMember(existing()) && (
+            // Action: Triage & Assignment
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'assignedAgentId', 'assignedAgentName', 'assignedGroup', 'priority',
+              'category', 'aiRouted', 'aiConfidence', 'aiSentiment', 'aiSummary',
+              'isRecurringIncident', 'parentIncidentRef', 'tags', 'updatedAt'
+            ]) ||
+            // Action: Status, Snooze & SLA Response Progression
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'snoozedUntilMs', 'firstResponded', 'updatedAt'
+            ]) ||
+            // Action: Full Ticket Resolution, Merge, Split, Tags or Edit by Workspace Member
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'snoozedUntilMs', 'priority', 'category', 'assignedAgentId', 'assignedAgentName',
+              'assignedGroup', 'firstResponded', 'isRecurringIncident', 'parentIncidentRef',
+              'mergedIntoRef', 'splitFromRef', 'tags', 'updatedAt'
+            ])
+          ))
+        );
+      allow delete: if isValidId(ticketId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+
+      // Ticket Events Subcollection (Master Gate)
+      match /events/{eventId} {
+        allow get: if isValidId(ticketId) && isValidId(eventId) && isVerified() && (
+          isAdmin() ||
+          isWorkspaceMember(get(/databases/$(database)/documents/tickets/$(ticketId)).data)
+        );
+        allow list: if isValidId(ticketId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+        allow create: if isValidId(ticketId) && isValidId(eventId) && isVerified() &&
+          isValidTicketEvent(incoming(), ticketId) &&
+          incoming().ownerId == request.auth.uid &&
+          request.auth.uid in incoming().memberIds &&
+          exists(/databases/$(database)/documents/tickets/$(ticketId)) && (
+            isAdmin() ||
+            isWorkspaceMember(get(/databases/$(database)/documents/tickets/$(ticketId)).data)
+          );
+        allow update: if false;
+        allow delete: if isValidId(ticketId) && isValidId(eventId) && isVerified() && (
+          isAdmin() ||
+          existing().ownerId == request.auth.uid
+        );
+      }
+    }
+
+    // On-Call Shifts (Astreintes)
+    match /onCallShifts/{shiftId} {
+      allow get: if isValidId(shiftId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(shiftId) && isVerified() &&
+        isValidOnCallShift(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/agents/$(incoming().agentId));
+      allow update: if isValidId(shiftId) && isVerified() &&
+        isValidOnCallShift(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'agentId', 'agentName', 'specialty', 'dayLabel', 'shiftDate', 'timeWindow',
+            'status', 'availabilityVerified', 'escalationPhone', 'notes', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(shiftId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Agent Leaves (Congés & Indisponibilités Calendrier d'équipe)
+    match /agentLeaves/{leaveId} {
+      allow get: if isValidId(leaveId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(leaveId) && isVerified() &&
+        isValidAgentLeave(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/agents/$(incoming().agentId));
+      allow update: if isValidId(leaveId) && isVerified() &&
+        isValidAgentLeave(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'leaveType', 'startDate', 'endDate', 'status', 'notes', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(leaveId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Automation Rules
+    match /automationRules/{ruleId} {
+      allow get: if isValidId(ruleId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(ruleId) && isVerified() &&
+        isValidAutomationRule(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(ruleId) && isVerified() &&
+        isValidAutomationRule(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'active', 'triggeredCount', 'triggerEvent', 'conditionPattern', 'actionSummary', 'targetGroup', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(ruleId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Call Logs
+    match /callLogs/{callId} {
+      allow get: if isValidId(callId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(callId) && isVerified() &&
+        isValidCallLog(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        exists(/databases/$(database)/documents/clients/$(incoming().clientId)) &&
+        exists(/databases/$(database)/documents/agents/$(incoming().agentId));
+      allow update: if false;
+      allow delete: if isValidId(callId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Knowledge Base Articles (Base de connaissances)
+    match /kbArticles/{articleId} {
+      allow get: if isValidId(articleId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(articleId) && isVerified() &&
+        isValidKbArticle(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(articleId) && isVerified() &&
+        isValidKbArticle(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'summary', 'body', 'category', 'language', 'articleType',
+            'tags', 'published', 'viewsCount', 'deflectionsCount', 'helpfulCount', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(articleId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Community Forum Topics (Forums communautaires)
+    match /forumTopics/{topicId} {
+      allow get: if isValidId(topicId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(topicId) && isVerified() &&
+        isValidForumTopic(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(topicId) && isVerified() &&
+        isValidForumTopic(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'upvotes', 'repliesCount', 'lastReplyNote', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(topicId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // CSAT Surveys (Enquêtes de satisfaction)
+    match /csatSurveys/{surveyId} {
+      allow get: if isValidId(surveyId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(surveyId) && isVerified() &&
+        isValidCsatSurvey(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        exists(/databases/$(database)/documents/clients/$(incoming().clientId)) &&
+        exists(/databases/$(database)/documents/agents/$(incoming().agentId));
+      allow update: if false;
+      allow delete: if isValidId(surveyId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Quality Assurance Evaluations (Contrôle Qualité QA)
+    match /qaEvaluations/{evalId} {
+      allow get: if isValidId(evalId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(evalId) && isVerified() &&
+        isValidQaEvaluation(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        exists(/databases/$(database)/documents/agents/$(incoming().agentId));
+      allow update: if false;
+      allow delete: if isValidId(evalId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Workforce Management Shifts (WFM)
+    match /wfmShifts/{shiftId} {
+      allow get: if isValidId(shiftId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(shiftId) && isVerified() &&
+        isValidWfmShift(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/agents/$(incoming().agentId));
+      allow update: if isValidId(shiftId) && isVerified() &&
+        isValidWfmShift(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'shiftDate', 'timeWindow', 'plannedHours', 'adherencePct', 'forecastTickets', 'activityType', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(shiftId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // External Integrations & Webhooks (CRM, ERP, Jira, Marketplace)
+    match /integrations/{integrationId} {
+      allow get: if isValidId(integrationId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(integrationId) && isVerified() &&
+        isValidExternalIntegration(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(integrationId) && isVerified() &&
+        isValidExternalIntegration(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'endpointUrl', 'eventsSummary', 'active', 'syncCount', 'lastSyncAt', 'lastStatus', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(integrationId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Workspace Admin Config (RBAC, RGPD, Language)
+    match /workspaceConfigs/{configId} {
+      allow get: if isValidId(configId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(configId) && isVerified() &&
+        isValidWorkspaceConfig(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds;
+      allow update: if isValidId(configId) && isVerified() &&
+        isValidWorkspaceConfig(incoming()) &&
+        incoming().ownerId == existing().ownerId && (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+            'defaultLanguage', 'gdprRetentionDays', 'anonymizeClosedAfterDays', 'apiKeyPrefix',
+            'agentPermissions', 'supervisorPermissions', 'adminPermissions',
+            'smartRoutingEnabled', 'smartRoutingPrioritizeTense',
+            'smartRoutingRespectAvailability', 'smartRoutingMaxLoadPct',
+            'slaAlertThresholdPct', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(configId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Immutable RGPD & Security Audit Logs
+    match /auditLogs/{logId} {
+      allow get: if isValidId(logId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(logId) && isVerified() &&
+        isValidAuditLogEntry(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds;
+      allow update: if false;
+      allow delete: if isValidId(logId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Colored Chart Annotations (Annotations graphiques analytiques)
+    match /chartAnnotations/{annotationId} {
+      allow get: if isValidId(annotationId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(annotationId) && isVerified() &&
+        isValidChartAnnotation(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(annotationId) && isVerified() &&
+        isValidChartAnnotation(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'notes', 'color', 'categoryLabel', 'targetChart',
+            'anchorLabel', 'positionPct', 'eventDate', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(annotationId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Progressive On-Call Shift Reports (Rapports d'astreinte en continu)
+    match /onCallReports/{reportId} {
+      allow get: if isValidId(reportId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(reportId) && isVerified() &&
+        isValidOnCallReport(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(reportId) && isVerified() &&
+        isValidOnCallReport(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'details', 'problemsEncountered', 'resolutionSteps',
+            'entryType', 'severity', 'ticketRef', 'timeSpentMinutes',
+            'handoverRequired', 'status', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(reportId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Knowledge Base PDF Library & Reader Notes (Bibliothèque PDF KB)
+    match /kbPdfDocuments/{docId} {
+      allow get: if isValidId(docId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(docId) && isVerified() &&
+        isValidKbPdfDocument(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(docId) && isVerified() &&
+        isValidKbPdfDocument(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'category', 'language', 'tags', 'extractedText', 'agentNotes',
+            'readingProgressPct', 'lastReadPage', 'kbContributionStatus',
+            'linkedKbArticleId', 'linkedKbArticleTitle', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(docId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Automated Weekly SLA & Critical Tickets Reports
+    match /weeklyReports/{reportId} {
+      allow get: if isValidId(reportId) && isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow list: if isVerified() && (isWorkspaceMember(existing()) || isAdmin());
+      allow create: if isValidId(reportId) && isVerified() &&
+        isValidWeeklyReport(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        request.auth.uid in incoming().memberIds &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(reportId) && isVerified() &&
+        isValidWeeklyReport(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt && (
+          isAdmin() ||
+          (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'weekLabel', 'rangeLabel', 'generationMode', 'totalTickets', 'resolvedTickets',
+            'openTickets', 'escalatedTickets', 'criticalTicketsCount', 'slaBreachedCount',
+            'slaCompliancePct', 'avgResponseMinutes', 'avgCsatScore', 'criticalTicketRefs',
+            'highlights', 'generatedBy', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidId(reportId) && isVerified() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+  }
+}

@@ -1,0 +1,79 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-display: 'Outfit', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-sans: 'Outfit', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono,
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Subtle dot-grid canvas texture for editorial auth backdrop */
+.bg-architectural-grid {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.28) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.dark .bg-architectural-grid {
+  background-image: radial-gradient(rgba(51, 65, 85, 0.45) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Gentle SLA >80% alert pulse animation */
+@keyframes sla-soft-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.34);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(220, 38, 38, 0);
+    opacity: 0.88;
+  }
+}
+
+@keyframes sla-soft-pulse-dark {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.36);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(248, 113, 113, 0);
+    opacity: 0.88;
+  }
+}
+
+.sla-alert-pulse {
+  animation: sla-soft-pulse 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.dark .sla-alert-pulse {
+  animation: sla-soft-pulse-dark 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Smooth reduced-motion respectful transitions */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

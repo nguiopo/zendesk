@@ -1,0 +1,6 @@
+{
+  "name": "ZentraDesk — Helpdesk Intelligent, SLA & Astreintes",
+  "description": "Plateforme Helpdesk proactive avec ticketing intelligent, gestion avancée des SLA, routage automatique par IA, suivi des capacités support et planification des astreintes.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

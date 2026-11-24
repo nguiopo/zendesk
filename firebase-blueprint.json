@@ -1,0 +1,608 @@
+{
+  "entities": {
+    "UserPublicProfile": {
+      "title": "UserPublicProfile",
+      "description": "Profil public d'un utilisateur agent authentifié",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin", "supervisor", "agent"] },
+        "department": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "avatarUrl": { "type": "string", "maxLength": 500 },
+        "themeMode": { "type": "string", "enum": ["light", "dark", "system", "schedule"] },
+        "preferredLocale": { "type": "string", "enum": ["fr", "en", "es"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "role", "department", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Informations personnelles isolées (PII) de l'utilisateur",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "SupportAgent": {
+      "title": "SupportAgent",
+      "description": "Agent du support client avec capacités et métriques opérationnelles",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "roleTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "group": { "type": "string", "enum": ["N1 Accès & Comptes", "N2 Plateforme", "N3 Infrastructure", "Relation Client & CTI"] },
+        "avatarUrl": { "type": "string", "maxLength": 500 },
+        "availability": { "type": "string", "enum": ["available", "busy", "on_call", "in_call", "off_duty"] },
+        "maxConcurrentTickets": { "type": "integer" },
+        "activeTickets": { "type": "integer" },
+        "callsHandled": { "type": "integer" },
+        "avgCallDurationSec": { "type": "integer" },
+        "situationChecks": { "type": "integer" },
+        "platformUsageScore": { "type": "integer" },
+        "clientAssistanceCount": { "type": "integer" },
+        "passwordUnlocksCount": { "type": "integer" },
+        "outOfZoneFollowups": { "type": "integer" },
+        "slaCompliancePct": { "type": "number" },
+        "csatScore": { "type": "number" },
+        "skills": { "type": "string", "maxLength": 300 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "roleTitle", "group", "availability", "maxConcurrentTickets", "activeTickets", "callsHandled", "avgCallDurationSec", "situationChecks", "platformUsageScore", "clientAssistanceCount", "passwordUnlocksCount", "outOfZoneFollowups", "slaCompliancePct", "csatScore", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "ClientAccount": {
+      "title": "ClientAccount",
+      "description": "Compte client surveillé pour suivi proactif, état de plateforme et hors-zone",
+      "type": "object",
+      "properties": {
+        "companyName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "contactName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "contactEmail": { "type": "string", "minLength": 3, "maxLength": 200 },
+        "contactPhone": { "type": "string", "minLength": 3, "maxLength": 40 },
+        "region": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "tier": { "type": "string", "enum": ["Enterprise VIP", "Business", "Standard"] },
+        "healthStatus": { "type": "string", "enum": ["nominal", "degraded", "out_of_zone", "password_locked", "critical"] },
+        "platformAdoptionPct": { "type": "integer" },
+        "passwordLocked": { "type": "boolean" },
+        "outOfZoneSignal": { "type": "boolean" },
+        "lastVerifiedNote": { "type": "string", "maxLength": 500 },
+        "lastVerifiedAt": { "type": "string", "maxLength": 64 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyName", "contactName", "contactEmail", "contactPhone", "region", "tier", "healthStatus", "platformAdoptionPct", "passwordLocked", "outOfZoneSignal", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "SlaPolicy": {
+      "title": "SlaPolicy",
+      "description": "Politique SLA définissant les délais cibles de première réponse, mise à jour et résolution",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "priorityScope": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+        "firstResponseMinutes": { "type": "integer" },
+        "updateMinutes": { "type": "integer" },
+        "resolutionMinutes": { "type": "integer" },
+        "escalationGroup": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "active": { "type": "boolean" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "priorityScope", "firstResponseMinutes", "updateMinutes", "resolutionMinutes", "escalationGroup", "active", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "Ticket": {
+      "title": "Ticket",
+      "description": "Ticket support intelligent avec suivi SLA, routage IA et détection d'incident récurrent",
+      "type": "object",
+      "properties": {
+        "reference": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "subject": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "channel": { "type": "string", "enum": ["email", "phone", "chat", "portal", "web_form", "facebook", "twitter", "instagram", "whatsapp", "slack_teams", "auto_alert"] },
+        "status": { "type": "string", "enum": ["new", "open", "pending_client", "snoozed", "escalated", "resolved", "closed"] },
+        "priority": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
+        "category": { "type": "string", "enum": ["Mot de passe bloqué", "Hors zone / Connectivité", "Utilisation plateforme", "Assistance client", "Vérification situation", "Incident infrastructure"] },
+        "clientId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clientName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "assignedAgentId": { "type": "string", "maxLength": 128 },
+        "assignedAgentName": { "type": "string", "maxLength": 120 },
+        "assignedGroup": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "slaPolicyId": { "type": "string", "maxLength": 128 },
+        "firstResponseDueMs": { "type": "integer" },
+        "resolutionDueMs": { "type": "integer" },
+        "snoozedUntilMs": { "type": "integer" },
+        "firstResponded": { "type": "boolean" },
+        "aiRouted": { "type": "boolean" },
+        "aiConfidence": { "type": "number" },
+        "aiSentiment": { "type": "string", "maxLength": 60 },
+        "aiSummary": { "type": "string", "maxLength": 600 },
+        "isRecurringIncident": { "type": "boolean" },
+        "parentIncidentRef": { "type": "string", "maxLength": 40 },
+        "mergedIntoRef": { "type": "string", "maxLength": 40 },
+        "splitFromRef": { "type": "string", "maxLength": 40 },
+        "isFavorite": { "type": "boolean" },
+        "tags": { "type": "array" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reference", "subject", "description", "channel", "status", "priority", "category", "clientId", "clientName", "assignedGroup", "firstResponseDueMs", "resolutionDueMs", "firstResponded", "aiRouted", "isRecurringIncident", "tags", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "TicketEvent": {
+      "title": "TicketEvent",
+      "description": "Entrée chronologique d'un ticket (réponse publique, note interne temps réel, événement SLA/IA)",
+      "type": "object",
+      "properties": {
+        "ticketId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "authorRole": { "type": "string", "enum": ["agent", "client", "system", "ai"] },
+        "visibility": { "type": "string", "enum": ["public", "internal"] },
+        "eventType": { "type": "string", "enum": ["reply", "note", "status_change", "ai_triage", "call_log", "password_unlock", "macro", "merge_split"] },
+        "body": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ticketId", "authorName", "authorRole", "visibility", "eventType", "body", "ownerId", "memberIds", "createdAt"]
+    },
+    "OnCallShift": {
+      "title": "OnCallShift",
+      "description": "Créneau d'astreinte technique planifié selon la disponibilité des agents",
+      "type": "object",
+      "properties": {
+        "agentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "agentName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "specialty": { "type": "string", "enum": ["Infrastructure N3", "Réseau & Hors Zone", "Sécurité & Accès", "Support VIP"] },
+        "dayLabel": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "shiftDate": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "timeWindow": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "status": { "type": "string", "enum": ["active", "scheduled", "standby", "completed"] },
+        "availabilityVerified": { "type": "boolean" },
+        "escalationPhone": { "type": "string", "minLength": 3, "maxLength": 40 },
+        "notes": { "type": "string", "maxLength": 400 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["agentId", "agentName", "specialty", "dayLabel", "timeWindow", "status", "availabilityVerified", "escalationPhone", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "AutomationRule": {
+      "title": "AutomationRule",
+      "description": "Règle d'automatisation pour incidents récurrents, déclencheurs événementiels et suivi proactif",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "triggerEvent": { "type": "string", "enum": ["ticket_created", "client_reply", "field_changed", "sla_warning"] },
+        "triggerCategory": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "conditionPattern": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "actionSummary": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "targetGroup": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "autoCreateIncident": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "triggeredCount": { "type": "integer" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "triggerCategory", "conditionPattern", "actionSummary", "targetGroup", "autoCreateIncident", "active", "triggeredCount", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "CallLog": {
+      "title": "CallLog",
+      "description": "Journal des appels téléphoniques et clients hors zone",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clientName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "agentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "agentName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "direction": { "type": "string", "enum": ["inbound", "outbound"] },
+        "outcome": { "type": "string", "enum": ["answered", "missed", "out_of_zone", "callback_scheduled"] },
+        "durationSeconds": { "type": "integer" },
+        "linkedTicketRef": { "type": "string", "maxLength": 40 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["clientId", "clientName", "agentId", "agentName", "direction", "outcome", "durationSeconds", "ownerId", "memberIds", "createdAt"]
+    },
+    "AgentLeave": {
+      "title": "AgentLeave",
+      "description": "Congé ou indisponibilité planifiée d'un agent technique pour le calendrier d'équipe",
+      "type": "object",
+      "properties": {
+        "agentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "agentName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "leaveType": { "type": "string", "enum": ["Congés payés", "RTT", "Formation", "Arrêt / Absence"] },
+        "startDate": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "endDate": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "status": { "type": "string", "enum": ["approved", "pending"] },
+        "notes": { "type": "string", "maxLength": 300 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["agentId", "agentName", "leaveType", "startDate", "endDate", "status", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "KbArticle": {
+      "title": "KbArticle",
+      "description": "Article, FAQ ou guide multilingue de la base de connaissances et du portail libre-service",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 6000 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "language": { "type": "string", "enum": ["fr", "en", "es"] },
+        "articleType": { "type": "string", "enum": ["article", "faq", "guide"] },
+        "tags": { "type": "array" },
+        "published": { "type": "boolean" },
+        "viewsCount": { "type": "integer" },
+        "deflectionsCount": { "type": "integer" },
+        "helpfulCount": { "type": "integer" },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "summary", "body", "category", "language", "articleType", "tags", "published", "viewsCount", "deflectionsCount", "helpfulCount", "authorName", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "ForumTopic": {
+      "title": "ForumTopic",
+      "description": "Discussion communautaire entre clients et équipe support",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 3000 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "language": { "type": "string", "enum": ["fr", "en", "es"] },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "authorCompany": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "status": { "type": "string", "enum": ["open", "answered", "pinned"] },
+        "upvotes": { "type": "integer" },
+        "repliesCount": { "type": "integer" },
+        "lastReplyNote": { "type": "string", "maxLength": 600 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "body", "category", "language", "authorName", "authorCompany", "status", "upvotes", "repliesCount", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "CsatSurvey": {
+      "title": "CsatSurvey",
+      "description": "Enquête de satisfaction client post-résolution (CSAT)",
+      "type": "object",
+      "properties": {
+        "ticketId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ticketRef": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "clientId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clientName": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "agentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "agentName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "rating": { "type": "integer" },
+        "comment": { "type": "string", "maxLength": 1000 },
+        "channel": { "type": "string", "enum": ["email", "portal", "phone"] },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ticketId", "ticketRef", "clientId", "clientName", "agentId", "agentName", "rating", "comment", "channel", "ownerId", "memberIds", "createdAt"]
+    },
+    "QaEvaluation": {
+      "title": "QaEvaluation",
+      "description": "Grille de contrôle qualité (QA) sur les interactions des agents",
+      "type": "object",
+      "properties": {
+        "agentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "agentName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "ticketRef": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "reviewerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "greetingScore": { "type": "integer" },
+        "diagnosticScore": { "type": "integer" },
+        "slaComplianceScore": { "type": "integer" },
+        "toneResolutionScore": { "type": "integer" },
+        "totalScore": { "type": "integer" },
+        "trainingNeed": { "type": "string", "maxLength": 200 },
+        "feedback": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["agentId", "agentName", "ticketRef", "reviewerName", "greetingScore", "diagnosticScore", "slaComplianceScore", "toneResolutionScore", "totalScore", "trainingNeed", "feedback", "ownerId", "memberIds", "createdAt"]
+    },
+    "WfmShift": {
+      "title": "WfmShift",
+      "description": "Planification WFM des shifts avec prévision de volume et adhérence",
+      "type": "object",
+      "properties": {
+        "agentId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "agentName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "shiftDate": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "timeWindow": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "plannedHours": { "type": "number" },
+        "adherencePct": { "type": "integer" },
+        "forecastTickets": { "type": "integer" },
+        "activityType": { "type": "string", "enum": ["Support N1/N2", "Téléphonie CTI", "Astreinte N3", "Formation / Coaching"] },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["agentId", "agentName", "shiftDate", "timeWindow", "plannedHours", "adherencePct", "forecastTickets", "activityType", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "ExternalIntegration": {
+      "title": "ExternalIntegration",
+      "description": "Connecteur natif marketplace ou webhook API vers CRM/ERP/Jira",
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["marketplace", "webhook"] },
+        "provider": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "endpointUrl": { "type": "string", "maxLength": 500 },
+        "eventsSummary": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "active": { "type": "boolean" },
+        "syncCount": { "type": "integer" },
+        "lastSyncAt": { "type": "string", "maxLength": 64 },
+        "lastStatus": { "type": "string", "maxLength": 80 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["kind", "provider", "name", "category", "eventsSummary", "active", "syncCount", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "WorkspaceConfig": {
+      "title": "WorkspaceConfig",
+      "description": "Configuration globale workspace : RBAC, rétention RGPD, langue par défaut et préfixe API",
+      "type": "object",
+      "properties": {
+        "defaultLanguage": { "type": "string", "enum": ["fr", "en", "es"] },
+        "gdprRetentionDays": { "type": "integer" },
+        "anonymizeClosedAfterDays": { "type": "integer" },
+        "apiKeyPrefix": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "agentPermissions": { "type": "array" },
+        "supervisorPermissions": { "type": "array" },
+        "adminPermissions": { "type": "array" },
+        "smartRoutingEnabled": { "type": "boolean" },
+        "smartRoutingPrioritizeTense": { "type": "boolean" },
+        "smartRoutingRespectAvailability": { "type": "boolean" },
+        "smartRoutingMaxLoadPct": { "type": "integer" },
+        "slaAlertThresholdPct": { "type": "integer" },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["defaultLanguage", "gdprRetentionDays", "anonymizeClosedAfterDays", "apiKeyPrefix", "agentPermissions", "supervisorPermissions", "adminPermissions", "ownerId", "memberIds", "updatedAt"]
+    },
+    "AuditLogEntry": {
+      "title": "AuditLogEntry",
+      "description": "Journal d'audit immuable des opérations sensibles (RGPD, RBAC, webhooks, QA, KB)",
+      "type": "object",
+      "properties": {
+        "actorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "actorRole": { "type": "string", "enum": ["admin", "supervisor", "agent"] },
+        "action": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "category": { "type": "string", "enum": ["rgpd", "rbac", "webhook", "integration", "qa", "kb"] },
+        "targetLabel": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "details": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actorName", "actorRole", "action", "category", "targetLabel", "details", "ownerId", "memberIds", "createdAt"]
+    },
+    "ChartAnnotation": {
+      "title": "ChartAnnotation",
+      "description": "Annotation colorée sur les graphiques analytiques pour signaler incidents majeurs et événements",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 400 },
+        "color": { "type": "string", "enum": ["red", "amber", "blue", "emerald", "violet"] },
+        "categoryLabel": { "type": "string", "enum": ["Incident majeur", "Pic hors zone", "Maintenance / Déploiement", "Jalon SLA", "Événement équipe"] },
+        "targetChart": { "type": "string", "enum": ["operations_timeline", "capacity_bars", "client_health_donut"] },
+        "anchorLabel": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "positionPct": { "type": "integer" },
+        "eventDate": { "type": "string", "minLength": 10, "maxLength": 10, "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "color", "categoryLabel", "targetChart", "anchorLabel", "positionPct", "eventDate", "authorName", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "OnCallReport": {
+      "title": "OnCallReport",
+      "description": "Entrée de rapport d'astreinte consignée au fil de l'eau par les agents helpdesk",
+      "type": "object",
+      "properties": {
+        "shiftId": { "type": "string", "maxLength": 128 },
+        "shiftLabel": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "agentName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "entryType": { "type": "string", "enum": ["incident", "action", "escalation", "handover", "resolved"] },
+        "severity": { "type": "string", "enum": ["info", "warning", "critical"] },
+        "ticketRef": { "type": "string", "maxLength": 40 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "details": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "problemsEncountered": { "type": "string", "maxLength": 2000 },
+        "resolutionSteps": { "type": "string", "maxLength": 2000 },
+        "timeSpentMinutes": { "type": "integer" },
+        "handoverRequired": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["open", "resolved", "handed_over"] },
+        "occurredAtLabel": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["shiftLabel", "agentName", "entryType", "severity", "title", "details", "timeSpentMinutes", "handoverRequired", "status", "occurredAtLabel", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "KbPdfDocument": {
+      "title": "KbPdfDocument",
+      "description": "Document PDF sauvegardé et annoté par les agents pour enrichir la base de connaissances",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "fileName": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "fileSizeBytes": { "type": "integer" },
+        "pageCount": { "type": "integer" },
+        "category": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "language": { "type": "string", "enum": ["fr", "en", "es"] },
+        "tags": { "type": "array" },
+        "extractedText": { "type": "string", "minLength": 1, "maxLength": 35000 },
+        "agentNotes": { "type": "string", "maxLength": 4000 },
+        "readingProgressPct": { "type": "integer" },
+        "lastReadPage": { "type": "integer" },
+        "kbContributionStatus": { "type": "string", "enum": ["to_review", "drafting", "integrated"] },
+        "linkedKbArticleId": { "type": "string", "maxLength": 128 },
+        "linkedKbArticleTitle": { "type": "string", "maxLength": 200 },
+        "uploadedBy": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "fileName", "fileSizeBytes", "pageCount", "category", "language", "tags", "extractedText", "agentNotes", "readingProgressPct", "lastReadPage", "kbContributionStatus", "uploadedBy", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    },
+    "WeeklyReport": {
+      "title": "WeeklyReport",
+      "description": "Rapport hebdomadaire automatisé résumant la conformité SLA et les tickets critiques",
+      "type": "object",
+      "properties": {
+        "weekKey": { "type": "string", "minLength": 7, "maxLength": 10, "pattern": "^[0-9]{4}-W[0-9]{2}$" },
+        "weekLabel": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "rangeLabel": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "generationMode": { "type": "string", "enum": ["auto", "manual"] },
+        "totalTickets": { "type": "integer" },
+        "resolvedTickets": { "type": "integer" },
+        "openTickets": { "type": "integer" },
+        "escalatedTickets": { "type": "integer" },
+        "criticalTicketsCount": { "type": "integer" },
+        "slaBreachedCount": { "type": "integer" },
+        "slaCompliancePct": { "type": "integer" },
+        "avgResponseMinutes": { "type": "integer" },
+        "avgCsatScore": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "criticalTicketRefs": { "type": "array" },
+        "highlights": { "type": "string", "maxLength": 1200 },
+        "generatedBy": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "memberIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["weekKey", "weekLabel", "rangeLabel", "generationMode", "totalTickets", "resolvedTickets", "openTickets", "escalatedTickets", "criticalTicketsCount", "slaBreachedCount", "slaCompliancePct", "avgResponseMinutes", "avgCsatScore", "criticalTicketRefs", "highlights", "generatedBy", "ownerId", "memberIds", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/public/profile": {
+      "schema": { "$ref": "#/entities/UserPublicProfile" },
+      "description": "Profil public de l'agent sans données PII"
+    },
+    "/users/{userId}/private/info": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Données personnelles privées (email) isolées"
+    },
+    "/agents/{agentId}": {
+      "schema": { "$ref": "#/entities/SupportAgent" },
+      "description": "Agents support et métriques de capacité"
+    },
+    "/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/ClientAccount" },
+      "description": "Comptes clients suivis proactivement"
+    },
+    "/slaPolicies/{policyId}": {
+      "schema": { "$ref": "#/entities/SlaPolicy" },
+      "description": "Politiques SLA configurées"
+    },
+    "/tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/Ticket" },
+      "description": "Tickets helpdesk intelligents"
+    },
+    "/tickets/{ticketId}/events/{eventId}": {
+      "schema": { "$ref": "#/entities/TicketEvent" },
+      "description": "Chronologie des échanges et notes internes d'un ticket"
+    },
+    "/onCallShifts/{shiftId}": {
+      "schema": { "$ref": "#/entities/OnCallShift" },
+      "description": "Planification des astreintes techniques"
+    },
+    "/agentLeaves/{leaveId}": {
+      "schema": { "$ref": "#/entities/AgentLeave" },
+      "description": "Congés et périodes d'indisponibilité des agents pour le calendrier d'équipe"
+    },
+    "/automationRules/{ruleId}": {
+      "schema": { "$ref": "#/entities/AutomationRule" },
+      "description": "Règles d'automatisation des problèmes techniques récurrents"
+    },
+    "/callLogs/{callId}": {
+      "schema": { "$ref": "#/entities/CallLog" },
+      "description": "Journal des appels téléphoniques et suivis hors zone"
+    },
+    "/kbArticles/{articleId}": {
+      "schema": { "$ref": "#/entities/KbArticle" },
+      "description": "Articles, FAQs et guides multilingues de la base de connaissances"
+    },
+    "/forumTopics/{topicId}": {
+      "schema": { "$ref": "#/entities/ForumTopic" },
+      "description": "Sujets et entraide sur le forum communautaire"
+    },
+    "/csatSurveys/{surveyId}": {
+      "schema": { "$ref": "#/entities/CsatSurvey" },
+      "description": "Retours clients CSAT après résolution"
+    },
+    "/qaEvaluations/{evalId}": {
+      "schema": { "$ref": "#/entities/QaEvaluation" },
+      "description": "Grilles de notation Contrôle Qualité (QA) des agents"
+    },
+    "/wfmShifts/{shiftId}": {
+      "schema": { "$ref": "#/entities/WfmShift" },
+      "description": "Planification WFM et suivi d'adhérence"
+    },
+    "/integrations/{integrationId}": {
+      "schema": { "$ref": "#/entities/ExternalIntegration" },
+      "description": "Connecteurs marketplace et webhooks API configurés"
+    },
+    "/workspaceConfigs/{configId}": {
+      "schema": { "$ref": "#/entities/WorkspaceConfig" },
+      "description": "Paramètres RBAC, RGPD et langue par défaut du workspace"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLogEntry" },
+      "description": "Journal d'audit immuable de conformité et sécurité"
+    },
+    "/chartAnnotations/{annotationId}": {
+      "schema": { "$ref": "#/entities/ChartAnnotation" },
+      "description": "Annotations colorées sur les graphiques analytiques de CapacityAnalyticsView"
+    },
+    "/onCallReports/{reportId}": {
+      "schema": { "$ref": "#/entities/OnCallReport" },
+      "description": "Journal progressif des rapports d'astreinte et points de relève"
+    },
+    "/kbPdfDocuments/{docId}": {
+      "schema": { "$ref": "#/entities/KbPdfDocument" },
+      "description": "Bibliothèque PDF et notes de lecture pour l'amélioration de la base de connaissances"
+    },
+    "/weeklyReports/{reportId}": {
+      "schema": { "$ref": "#/entities/WeeklyReport" },
+      "description": "Rapports hebdomadaires automatisés SLA et tickets critiques archivés"
+    }
+  }
+}
