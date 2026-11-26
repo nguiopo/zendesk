@@ -104,17 +104,19 @@ export const OnCallScheduleView: React.FC<OnCallScheduleViewProps> = ({
 
   // Schedule On-Call Shift Modal state
   const [showShiftModal, setShowShiftModal] = useState(false);
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState(agents[0]?.id || '');
   const [specialty, setSpecialty] = useState<OnCallSpecialty>('Infrastructure N3');
   const [shiftDate, setShiftDate] = useState(getTodayIso());
   const [dayLabel, setDayLabel] = useState(formatFrenchDayLabel(getTodayIso()));
-  const [timeWindow, setTimeWindow] = useState('08:00 — 20:00');
+  const [timeWindow, setTimeWindow] = useState('08:00 – 20:00');
   const [escalationPhone, setEscalationPhone] = useState('+33 6 40 22 19 88');
   const [notes, setNotes] = useState('');
   const [savingShift, setSavingShift] = useState(false);
 
   // Declare Leave Modal state
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [editingLeaveId, setEditingLeaveId] = useState<string | null>(null);
   const [leaveAgentId, setLeaveAgentId] = useState(agents[0]?.id || '');
   const [leaveType, setLeaveType] = useState<LeaveType>('Congés payés');
   const [leaveStartDate, setLeaveStartDate] = useState(getTodayIso());
@@ -247,22 +249,33 @@ export const OnCallScheduleView: React.FC<OnCallScheduleViewProps> = ({
 
   const openShiftModalWithDate = (dateIso?: string) => {
     const targetDate = dateIso || getTodayIso();
-    const firstAvailable = agents.find(
-      (a) => a.availability === 'available' || a.availability === 'on_call'
-    );
+    const firstAvailable = agents.find((a) => a.availability === 'available' || a.availability === 'on_call');
     if (firstAvailable) setSelectedAgentId(firstAvailable.id);
+    setEditingShiftId(null);
     setShiftDate(targetDate);
     setDayLabel(formatFrenchDayLabel(targetDate));
+    setTimeWindow('08:00 – 20:00');
+    setNotes('');
+    setShowShiftModal(true);
+  };
+
+  const openEditShift = (shift: OnCallShift) => {
+    setEditingShiftId(shift.id);
+    setSelectedAgentId(shift.agentId);
+    setSpecialty(shift.specialty);
+    setShiftDate(shift.shiftDate || getTodayIso());
+    setDayLabel(shift.dayLabel);
+    setTimeWindow(shift.timeWindow);
+    setEscalationPhone(shift.escalationPhone || '+33 6 40 22 19 88');
+    setNotes(shift.notes || '');
     setShowShiftModal(true);
   };
 
   const openLeaveModalWithDate = (dateIso?: string, preferredAgentId?: string) => {
     const targetDate = dateIso || getTodayIso();
-    if (preferredAgentId) {
-      setLeaveAgentId(preferredAgentId);
-    } else if (!leaveAgentId && agents[0]) {
-      setLeaveAgentId(agents[0].id);
-    }
+    if (preferredAgentId) setLeaveAgentId(preferredAgentId);
+    else if (!leaveAgentId && agents[0]) setLeaveAgentId(agents[0].id);
+    setEditingLeaveId(null);
     setLeaveStartDate(targetDate);
     setLeaveEndDate(targetDate);
     setLeaveStatus('approved');
@@ -270,65 +283,69 @@ export const OnCallScheduleView: React.FC<OnCallScheduleViewProps> = ({
     setShowLeaveModal(true);
   };
 
-  const handleCreateShift = async (e: React.FormEvent) => {
+  const openEditLeave = (leave: AgentLeave) => {
+    setEditingLeaveId(leave.id);
+    setLeaveAgentId(leave.agentId);
+    setLeaveType(leave.leaveType);
+    setLeaveStartDate(leave.startDate);
+    setLeaveEndDate(leave.endDate);
+    setLeaveStatus(leave.status);
+    setLeaveNotes(leave.notes || '');
+    setShowLeaveModal(true);
+  };
+
+  const handleSaveShift = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedAgent) return;
     setSavingShift(true);
     const validIsoDate = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(shiftDate) ? shiftDate : undefined;
     try {
-      await addDoc(collection(db, 'onCallShifts'), {
+      const payload = {
         agentId: selectedAgent.id,
         agentName: clampString(selectedAgent.name, 120),
         specialty,
         dayLabel: clampString(dayLabel || 'Créneau planifié', 60),
         ...(validIsoDate ? { shiftDate: validIsoDate } : {}),
         timeWindow: clampString(timeWindow, 60),
-        status: 'scheduled',
+        status: editingShiftId ? (shifts.find((s) => s.id === editingShiftId)?.status || 'scheduled') : 'scheduled',
         availabilityVerified: Boolean(isSelectedAgentEligible && !selectedAgentHasLeaveOnShiftDate),
         escalationPhone: clampString(escalationPhone, 40),
         ...(notes.trim() ? { notes: clampString(notes, 400) } : {}),
         ownerId: uid,
         memberIds: [uid],
-        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
+      };
+      if (editingShiftId) await updateDoc(doc(db, 'onCallShifts', editingShiftId), payload);
+      else await addDoc(collection(db, 'onCallShifts'), { ...payload, createdAt: serverTimestamp() });
       setShowShiftModal(false);
+      setEditingShiftId(null);
       setNotes('');
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'onCallShifts');
+      handleFirestoreError(err, editingShiftId ? OperationType.UPDATE : OperationType.CREATE, editingShiftId ? `onCallShifts/${editingShiftId}` : 'onCallShifts');
     } finally {
       setSavingShift(false);
     }
   };
 
-  const handleCreateLeave = async (e: React.FormEvent) => {
+  const handleSaveLeave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedLeaveAgent) return;
     if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(leaveStartDate)) return;
-    const normalizedEnd =
-      /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(leaveEndDate) && leaveEndDate >= leaveStartDate
-        ? leaveEndDate
-        : leaveStartDate;
-
+    const normalizedEnd = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(leaveEndDate) && leaveEndDate >= leaveStartDate ? leaveEndDate : leaveStartDate;
     setSavingLeave(true);
     try {
-      await addDoc(collection(db, 'agentLeaves'), {
+      const payload = {
         agentId: selectedLeaveAgent.id,
         agentName: clampString(selectedLeaveAgent.name, 120),
-        leaveType,
-        startDate: leaveStartDate,
-        endDate: normalizedEnd,
-        status: leaveStatus,
+        leaveType, startDate: leaveStartDate, endDate: normalizedEnd, status: leaveStatus,
         ...(leaveNotes.trim() ? { notes: clampString(leaveNotes, 300) } : {}),
-        ownerId: uid,
-        memberIds: [uid],
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      setShowLeaveModal(false);
-      setLeaveNotes('');
+        ownerId: uid, memberIds: [uid], updatedAt: serverTimestamp(),
+      };
+      if (editingLeaveId) await updateDoc(doc(db, 'agentLeaves', editingLeaveId), payload);
+      else await addDoc(collection(db, 'agentLeaves'), { ...payload, createdAt: serverTimestamp() });
+      setShowLeaveModal(false); setEditingLeaveId(null); setLeaveNotes('');
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'agentLeaves');
+      handleFirestoreError(err, editingLeaveId ? OperationType.UPDATE : OperationType.CREATE, editingLeaveId ? `agentLeaves/${editingLeaveId}` : 'agentLeaves');
     } finally {
       setSavingLeave(false);
     }
@@ -501,7 +518,10 @@ export const OnCallScheduleView: React.FC<OnCallScheduleViewProps> = ({
           agents={agents}
           shifts={shifts}
           leaves={leaves}
-          onDeclareLeaveForDate={(dateIso, agentId) => openLeaveModalWithDate(dateIso, agentId)}
+          onDeclareLeaveForDate={(dateIso, agentId) => {
+            const existing = leaves.find((l) => l.agentId === agentId && l.startDate <= dateIso && l.endDate >= dateIso);
+            if (existing) openEditLeave(existing); else openLeaveModalWithDate(dateIso, agentId);
+          }}
           onScheduleShiftForDate={(dateIso) => openShiftModalWithDate(dateIso)}
         />
       ) : subTab === 'reports' ? (
@@ -683,19 +703,11 @@ export const OnCallScheduleView: React.FC<OnCallScheduleViewProps> = ({
                         </select>
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => openReportModalForShift(shift)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 border border-blue-200 dark:border-blue-800/70 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                        >
-                          <ClipboardList className="w-3.5 h-3.5" />
-                          <span>Rapport</span>
-                          {shiftReportCount > 0 && (
-                            <span className="px-1.5 py-0.2 rounded bg-blue-600 text-white font-mono text-[10px]">
-                              {shiftReportCount}
-                            </span>
-                          )}
-                        </button>
+                        <div className="inline-flex items-center gap-2 justify-end">
+                          <button type="button" onClick={() => openReportModalForShift(shift)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 border border-blue-200 dark:border-blue-800/70 rounded-lg cursor-pointer whitespace-nowrap shrink-0"><ClipboardList className="w-3.5 h-3.5" /><span>Rapport</span>{shiftReportCount > 0 && <span className="px-1.5 py-0.2 rounded bg-blue-600 text-white font-mono text-[10px]">{shiftReportCount}</span>}</button>
+                          <button type="button" onClick={() => openEditShift(shift)} className="px-2.5 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer">Modifier</button>
+                          <button type="button" onClick={() => handleDeleteShift(shift)} className="px-2.5 py-1.5 text-xs border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 rounded-lg cursor-pointer">Supprimer</button>
+                        </div>
                       </td>
                     </tr>
                     );
@@ -713,14 +725,14 @@ export const OnCallScheduleView: React.FC<OnCallScheduleViewProps> = ({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                Planifier un créneau d’astreinte
+                {editingShiftId ? 'Modifier l’astreinte' : 'Planifier un créneau d’astreinte'}
               </h3>
-              <button type="button" onClick={() => setShowShiftModal(false)} className="cursor-pointer">
+              <button type="button" onClick={() => { setShowShiftModal(false); setEditingShiftId(null); }} className="cursor-pointer">
                 <X className="w-4 h-4 text-slate-500" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateShift} className="space-y-3">
+            <form onSubmit={handleSaveShift} className="space-y-3">
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
                   Agent technique (filtré par disponibilité)
@@ -847,20 +859,8 @@ export const OnCallScheduleView: React.FC<OnCallScheduleViewProps> = ({
               </label>
 
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowShiftModal(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingShift}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
-                >
-                  {savingShift ? 'Enregistrement...' : 'Confirmer le tour'}
-                </button>
+                <button type="button" onClick={() => { setShowShiftModal(false); setEditingShiftId(null); }} className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer">Annuler</button>
+                <button type="submit" disabled={savingShift} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer">{savingShift ? 'Enregistrement...' : editingShiftId ? 'Mettre à jour' : 'Confirmer le tour'}</button>
               </div>
             </form>
           </div>
@@ -873,14 +873,14 @@ export const OnCallScheduleView: React.FC<OnCallScheduleViewProps> = ({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                Déclarer un congé ou une indisponibilité
+                {editingLeaveId ? 'Modifier le congé' : 'Déclarer un congé ou une indisponibilité'}
               </h3>
-              <button type="button" onClick={() => setShowLeaveModal(false)} className="cursor-pointer">
+              <button type="button" onClick={() => { setShowLeaveModal(false); setEditingLeaveId(null); }} className="cursor-pointer">
                 <X className="w-4 h-4 text-slate-500" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateLeave} className="space-y-3">
+            <form onSubmit={handleSaveLeave} className="space-y-3">
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Agent concerné</span>
                 <select
@@ -996,20 +996,8 @@ export const OnCallScheduleView: React.FC<OnCallScheduleViewProps> = ({
               </label>
 
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowLeaveModal(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingLeave}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
-                >
-                  {savingLeave ? 'Enregistrement...' : 'Enregistrer le congé'}
-                </button>
+                <button type="button" onClick={() => { setShowLeaveModal(false); setEditingLeaveId(null); }} className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer">Annuler</button>
+                <button type="submit" disabled={savingLeave} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer">{savingLeave ? 'Enregistrement...' : editingLeaveId ? 'Mettre à jour' : 'Enregistrer le congé'}</button>
               </div>
             </form>
           </div>

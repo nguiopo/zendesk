@@ -533,7 +533,7 @@ export const CollaborationCallView: React.FC<CollaborationCallViewProps> = ({
                   type="text"
                   value={ticketRefInput}
                   onChange={(e) => setTicketRefInput(e.target.value)}
-                  placeholder="Réf. ticket (ex: ZD-2041)"
+                  placeholder="Réf. ticket (ex: ZD-0001)"
                   className="w-36 px-3 py-2 text-xs font-mono bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
                 />
                 <input

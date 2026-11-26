@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   onSnapshot,
   orderBy,
@@ -187,17 +188,7 @@ const DEFAULT_MACROS: MacroDefinition[] = [
   },
 ];
 
-function loadLocalList<T>(key: string, fallback: T[]): T[] {
-  if (typeof window === 'undefined') return fallback;
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback;
-  } catch {
-    return fallback;
-  }
-}
+// localStorage removed for dynamic Firestore-backed workspace settings
 
 export const TicketsView: React.FC<TicketsViewProps> = ({
   uid,
@@ -228,7 +219,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
   const [sortTenseFirst, setSortTenseFirst] = useState(false);
   const [onlyVipFilter, setOnlyVipFilter] = useState(false);
   const [onlyFavoritesFilter, setOnlyFavoritesFilter] = useState(externalViewMode === 'favorites');
-  const [savedViews, setSavedViews] = useState<SavedTicketView[]>(() => loadLocalList(SAVED_VIEWS_STORAGE_KEY, DEFAULT_SAVED_VIEWS));
+  const [savedViews, setSavedViews] = useState<SavedTicketView[]>([]);
   const [newViewLabel, setNewViewLabel] = useState('');
   const [showSaveViewForm, setShowSaveViewForm] = useState(false);
 
@@ -277,15 +268,11 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
   const [bulkNotice, setBulkNotice] = useState<{ tone: 'info' | 'warn'; text: string } | null>(null);
   const shiftHeldRef = React.useRef(false);
   const bulkNoticeTimerRef = React.useRef<number | null>(null);
-  const [cannedResponses, setCannedResponses] = useState<CannedResponseItem[]>(() =>
-    loadLocalList(CANNED_STORAGE_KEY, DEFAULT_CANNED_RESPONSES)
-  );
+  const [cannedResponses, setCannedResponses] = useState<CannedResponseItem[]>([]);
   const [showNewCannedForm, setShowNewCannedForm] = useState(false);
   const [newCannedTitle, setNewCannedTitle] = useState('');
   const [newCannedBody, setNewCannedBody] = useState('');
-  const [macros, setMacros] = useState<MacroDefinition[]>(() =>
-    loadLocalList(MACROS_STORAGE_KEY, DEFAULT_MACROS)
-  );
+  const [macros, setMacros] = useState<MacroDefinition[]>([]);
   const [showNewMacroForm, setShowNewMacroForm] = useState(false);
   const [newMacroLabel, setNewMacroLabel] = useState('');
   const [newMacroReply, setNewMacroReply] = useState('');
@@ -378,6 +365,16 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
     const timer = window.setInterval(() => setNowMs(Date.now()), 30000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsubs = [
+      onSnapshot(query(collection(db, 'savedViews'), where('ownerId', '==', uid)), (snap) => setSavedViews(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))),
+      onSnapshot(query(collection(db, 'cannedResponses'), where('ownerId', '==', uid)), (snap) => setCannedResponses(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))),
+      onSnapshot(query(collection(db, 'ticketMacros'), where('ownerId', '==', uid)), (snap) => setMacros(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))),
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, [uid]);
 
   useEffect(() => {
     if (openCreateModalSignal > 0) {
@@ -1498,12 +1495,12 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
     if (!activeTicket) return;
     try {
       const noteText = [
-        `[Résumé IA · ${activeTicket.reference}]`,
+        `[Résumé IA — ${activeTicket.reference}]`,
         summaryData.summary,
         summaryData.keyPoints.length > 0
           ? `Points clés :\n${summaryData.keyPoints.map((p) => `- ${p}`).join('\n')}`
           : '',
-        `Prochaine étape : ${summaryData.recommendedNextStep}`,
+        `Prochaine Étape : ${summaryData.recommendedNextStep}`,
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -1525,70 +1522,63 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
     }
   };
 
-  const handleSaveCurrentView = (e: React.FormEvent) => {
+  const handleDeleteTicket = async (ticket: Ticket) => {
+    if (!window.confirm(`Supprimer le ticket ${ticket.reference} ?`)) return;
+    try {
+      await deleteDoc(doc(db, 'tickets', ticket.id));
+      if (selectedTicketId === ticket.id) setSelectedTicketId(null);
+      showTempNotice(`Ticket ${ticket.reference} supprimé.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `tickets/${ticket.id}`);
+    }
+  };
+
+  const handleSaveCurrentView = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newViewLabel.trim()) return;
-    const next: SavedTicketView = {
-      id: `view_${Date.now()}`,
-      label: newViewLabel.trim().slice(0, 32),
-      statusFilter,
-      channelGroup,
-      onlyVip: onlyVipFilter,
-      onlyFavorites: onlyFavoritesFilter,
-      ...(selectedPriorities.length > 0
-        ? {
-            priorityFilters: selectedPriorities,
-            ...(selectedPriorities.length === 1 ? { priorityFilter: selectedPriorities[0] } : {}),
-          }
-        : {}),
-      ...(supportLevelFilter !== 'all' ? { supportLevelFilter } : {}),
-    };
-    const updated = [...savedViews, next];
-    setSavedViews(updated);
-    window.localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(updated));
-    setNewViewLabel('');
-    setShowSaveViewForm(false);
+    try {
+      await addDoc(collection(db, 'savedViews'), {
+        label: newViewLabel.trim().slice(0, 32),
+        statusFilter, channelGroup, onlyVip: onlyVipFilter, onlyFavorites: onlyFavoritesFilter,
+        ...(selectedPriorities.length > 0 ? { priorityFilters: selectedPriorities } : {}),
+        ...(supportLevelFilter !== 'all' ? { supportLevelFilter } : {}),
+        ownerId: uid, memberIds: [uid], createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      });
+      setNewViewLabel(''); setShowSaveViewForm(false);
+    } catch (err) { handleFirestoreError(err, OperationType.CREATE, 'savedViews'); }
   };
 
-  const handleDeleteSavedView = (id: string) => {
-    const updated = savedViews.filter((v) => v.id !== id);
-    setSavedViews(updated);
-    window.localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(updated));
+  const handleDeleteSavedView = async (id: string) => {
+    try { await deleteDoc(doc(db, 'savedViews', id)); } catch (err) { handleFirestoreError(err, OperationType.DELETE, `savedViews/${id}`); }
   };
 
-  const handleCreateCannedResponse = (e: React.FormEvent) => {
+  const handleCreateCannedResponse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCannedTitle.trim() || !newCannedBody.trim()) return;
-    const next: CannedResponseItem = {
-      id: `can_${Date.now()}`,
-      title: newCannedTitle.trim().slice(0, 60),
-      category: activeTicket?.category || 'Général',
-      body: newCannedBody.trim().slice(0, 2000),
-    };
-    const updated = [next, ...cannedResponses];
-    setCannedResponses(updated);
-    window.localStorage.setItem(CANNED_STORAGE_KEY, JSON.stringify(updated));
-    setNewCannedTitle('');
-    setNewCannedBody('');
-    setShowNewCannedForm(false);
+    try {
+      await addDoc(collection(db, 'cannedResponses'), {
+        title: newCannedTitle.trim().slice(0, 60),
+        category: activeTicket?.category || 'Général',
+        body: newCannedBody.trim().slice(0, 2000),
+        ownerId: uid, memberIds: [uid], createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      });
+      setNewCannedTitle(''); setNewCannedBody(''); setShowNewCannedForm(false);
+    } catch (err) { handleFirestoreError(err, OperationType.CREATE, 'cannedResponses'); }
   };
 
-  const handleCreateMacro = (e: React.FormEvent) => {
+  const handleCreateMacro = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMacroLabel.trim() || !newMacroReply.trim()) return;
-    const next: MacroDefinition = {
-      id: `macro_${Date.now()}`,
-      label: newMacroLabel.trim().slice(0, 60),
-      replyBody: newMacroReply.trim().slice(0, 2000),
-      statusUpdate: newMacroStatus,
-      addTag: 'macro-perso',
-    };
-    const updated = [next, ...macros];
-    setMacros(updated);
-    window.localStorage.setItem(MACROS_STORAGE_KEY, JSON.stringify(updated));
-    setNewMacroLabel('');
-    setNewMacroReply('');
-    setShowNewMacroForm(false);
+    try {
+      await addDoc(collection(db, 'ticketMacros'), {
+        label: newMacroLabel.trim().slice(0, 60),
+        replyBody: newMacroReply.trim().slice(0, 2000),
+        statusUpdate: newMacroStatus,
+        addTag: 'macro-perso',
+        ownerId: uid, memberIds: [uid], createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      });
+      setNewMacroLabel(''); setNewMacroReply(''); setShowNewMacroForm(false);
+    } catch (err) { handleFirestoreError(err, OperationType.CREATE, 'ticketMacros'); }
   };
 
   const handleCreateTicket = async (e: React.FormEvent) => {
@@ -3258,6 +3248,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>{copilotLoading ? 'Copilote...' : 'Copilote IA'}</span>
                   </button>
+                  <button type="button" onClick={() => handleDeleteTicket(activeTicket)} className="inline-flex items-center gap-1.5 px-3 py-2 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg cursor-pointer">Supprimer</button>
                   <button
                     type="button"
                     onClick={() => handleAiRouteTicket(activeTicket)}

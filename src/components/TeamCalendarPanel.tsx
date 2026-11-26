@@ -767,15 +767,8 @@ export const TeamCalendarPanel: React.FC<TeamCalendarPanelProps> = ({
                               <span>Valider</span>
                             </button>
                           )}
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => handleDeleteLeave(lv)}
-                            title="Supprimer ce congé"
-                            className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 cursor-pointer disabled:opacity-50"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <button type="button" disabled={isBusy} onClick={() => onDeclareLeaveForDate(lv.startDate, lv.agentId)} title="Modifier ce congé" className="px-2 py-1 text-[11px] font-medium rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer disabled:opacity-50">Modifier</button>
+                          <button type="button" disabled={isBusy} onClick={() => handleDeleteLeave(lv)} title="Supprimer ce congé" className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 cursor-pointer disabled:opacity-50"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </div>
                     </div>

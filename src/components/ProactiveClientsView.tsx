@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   increment,
   serverTimestamp,
@@ -98,8 +99,9 @@ export const ProactiveClientsView: React.FC<ProactiveClientsViewProps> = ({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [showAddClient, setShowAddClient] = useState(false);
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
 
-  // Add client form
+  // Client form
   const [companyName, setCompanyName] = useState('');
   const [contactName, setContactName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -270,8 +272,7 @@ export const ProactiveClientsView: React.FC<ProactiveClientsViewProps> = ({
         resolutionDueMs: now + 240 * 60 * 1000,
         firstResponded: true,
         aiRouted: false,
-        isRecurringIncident: true,
-        parentIncidentRef: 'INC-REL-09',
+        isRecurringIncident: false,
         tags: ['hors-zone', 'rappel-proactif'],
         ownerId: uid,
         memberIds: [uid],
@@ -299,41 +300,78 @@ export const ProactiveClientsView: React.FC<ProactiveClientsViewProps> = ({
     }
   };
 
-  const handleCreateClient = async (e: React.FormEvent) => {
+  const resetClientForm = () => {
+    setEditingClientId(null);
+    setCompanyName('');
+    setContactName('');
+    setContactEmail('');
+    setContactPhone('');
+    setRegion('Île-de-France');
+    setTier('Business');
+  };
+
+  const openEditClient = (client: ClientAccount) => {
+    setEditingClientId(client.id);
+    setCompanyName(client.companyName);
+    setContactName(client.contactName);
+    setContactEmail(client.contactEmail);
+    setContactPhone(client.contactPhone || '');
+    setRegion(client.region || 'Île-de-France');
+    setTier(client.tier);
+    setShowAddClient(true);
+  };
+
+  const handleSaveClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!companyName.trim() || !contactName.trim() || !contactEmail.trim()) return;
     setBusyId('create');
     try {
-      const createdRef = await addDoc(collection(db, 'clients'), {
+      const payload = {
         companyName: clampString(companyName, 150),
         contactName: clampString(contactName, 120),
         contactEmail: clampString(contactEmail, 200),
         contactPhone: clampString(contactPhone || '+33 1 00 00 00 00', 40),
         region: clampString(region, 80, 'France'),
         tier,
-        healthStatus: 'nominal',
-        platformAdoptionPct: clampInt(80, 0, 100),
-        passwordLocked: false,
-        outOfZoneSignal: false,
-        lastVerifiedNote: 'Compte ajouté et vérifié lors de la création.',
-        lastVerifiedAt: 'À l’instant',
-        ownerId: uid,
-        memberIds: [uid],
-        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
-      setSelectedClientId(createdRef.id);
-      setDetailDismissed(false);
+      };
+      if (editingClientId) {
+        await updateDoc(doc(db, 'clients', editingClientId), payload);
+        setActionFeedback(`Client ${companyName} mis à jour.`);
+      } else {
+        const createdRef = await addDoc(collection(db, 'clients'), {
+          ...payload,
+          healthStatus: 'nominal',
+          platformAdoptionPct: clampInt(80, 0, 100),
+          passwordLocked: false,
+          outOfZoneSignal: false,
+          lastVerifiedNote: 'Compte ajouté lors de la création.',
+          lastVerifiedAt: 'À l’instant',
+          ownerId: uid,
+          memberIds: [uid],
+          createdAt: serverTimestamp(),
+        });
+        setSelectedClientId(createdRef.id);
+        setDetailDismissed(false);
+        setActionFeedback(`Compte client ${companyName} ajouté.`);
+      }
       setShowAddClient(false);
-      setCompanyName('');
-      setContactName('');
-      setContactEmail('');
-      setContactPhone('');
-      setActionFeedback(`Compte client ${companyName} ajouté au suivi proactif.`);
+      resetClientForm();
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'clients');
+      handleFirestoreError(err, editingClientId ? OperationType.UPDATE : OperationType.CREATE, editingClientId ? `clients/${editingClientId}` : 'clients');
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const handleDeleteClient = async (client: ClientAccount) => {
+    if (!window.confirm(`Supprimer le client ${client.companyName} ?`)) return;
+    try {
+      await deleteDoc(doc(db, 'clients', client.id));
+      if (selectedClientId === client.id) setSelectedClientId(null);
+      setActionFeedback(`Client ${client.companyName} supprimé.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `clients/${client.id}`);
     }
   };
 
@@ -577,6 +615,8 @@ export const ProactiveClientsView: React.FC<ProactiveClientsViewProps> = ({
                             <PhoneOutgoing className="w-3.5 h-3.5" />
                             <span>{dict.btnOutOfZone}</span>
                           </button>
+                          <button type="button" onClick={() => openEditClient(client)} className="px-2.5 py-1.5 border border-slate-200 dark:border-slate-700 rounded-lg text-xs cursor-pointer">Modifier</button>
+                          <button type="button" onClick={() => handleDeleteClient(client)} className="px-2.5 py-1.5 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 rounded-lg text-xs cursor-pointer">Supprimer</button>
                         </div>
                       </td>
                     </tr>
@@ -604,6 +644,8 @@ export const ProactiveClientsView: React.FC<ProactiveClientsViewProps> = ({
               onUnlockPassword={handleUnlockPassword}
               onOutOfZoneCallFollowup={handleOutOfZoneCallFollowup}
               onOpenTicket={onOpenTicket}
+              onEdit={openEditClient}
+              onDelete={handleDeleteClient}
             />
           </div>
         )}
@@ -615,13 +657,13 @@ export const ProactiveClientsView: React.FC<ProactiveClientsViewProps> = ({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                Ajouter un compte client suivi
+                {editingClientId ? 'Modifier le client' : 'Ajouter un compte client suivi'}
               </h3>
-              <button type="button" onClick={() => setShowAddClient(false)} className="cursor-pointer">
+              <button type="button" onClick={() => { setShowAddClient(false); resetClientForm(); }} className="cursor-pointer">
                 <X className="w-4 h-4 text-slate-500" />
               </button>
             </div>
-            <form onSubmit={handleCreateClient} className="space-y-3">
+            <form onSubmit={handleSaveClient} className="space-y-3">
               <input
                 type="text"
                 required
@@ -675,7 +717,7 @@ export const ProactiveClientsView: React.FC<ProactiveClientsViewProps> = ({
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddClient(false)}
+                  onClick={() => { setShowAddClient(false); resetClientForm(); }}
                   className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer"
                 >
                   Annuler
@@ -686,7 +728,7 @@ export const ProactiveClientsView: React.FC<ProactiveClientsViewProps> = ({
                   className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
                 >
                   <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>Enregistrer</span>
+                  <span>{editingClientId ? 'Mettre à jour' : 'Enregistrer'}</span>
                 </button>
               </div>
             </form>

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { addDoc, collection, doc, increment, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, increment, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import {
   Activity,
   BarChart3,
@@ -28,6 +28,7 @@ import {
   SupportAgent,
   SupportGroup,
   Ticket,
+  TicketPriority,
   WorkspaceConfig,
 } from '../types/helpdesk';
 import { TICKET_PRIORITY_LABELS } from '../lib/formatters';
@@ -366,7 +367,7 @@ export const AiAutomationView: React.FC<AiAutomationViewProps> = ({
       for (const t of matchingTickets.slice(0, 3)) {
         await updateDoc(doc(db, 'tickets', t.id), {
           isRecurringIncident: true,
-          parentIncidentRef: rule.autoCreateIncident ? 'INC-AUTO-204' : t.parentIncidentRef || 'INC-REL-09',
+          parentIncidentRef: rule.autoCreateIncident ? `INC-AUTO-${Date.now().toString().slice(-4)}` : t.parentIncidentRef || undefined,
           assignedGroup: rule.targetGroup,
           updatedAt: serverTimestamp(),
         });
@@ -380,11 +381,28 @@ export const AiAutomationView: React.FC<AiAutomationViewProps> = ({
     }
   };
 
-  const handleCreateRule = async (e: React.FormEvent) => {
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [editingSlaId, setEditingSlaId] = useState<string | null>(null);
+  const [slaName, setSlaName] = useState('');
+  const [slaPriority, setSlaPriority] = useState<TicketPriority>('high');
+  const [slaFirst, setSlaFirst] = useState(30);
+  const [slaUpdate, setSlaUpdate] = useState(60);
+  const [slaResolution, setSlaResolution] = useState(240);
+  const [showSlaModal, setShowSlaModal] = useState(false);
+
+  const openEditRule = (rule: AutomationRule) => {
+    setEditingRuleId(rule.id);
+    setRuleName(rule.name); setRulePattern(rule.conditionPattern); setRuleAction(rule.actionSummary);
+    setRuleCategory(rule.triggerCategory || 'Utilisation plateforme'); setRuleGroup(rule.targetGroup as SupportGroup);
+    setRuleTriggerEvent(rule.triggerEvent || 'ticket_created'); setRuleAutoIncident(rule.autoCreateIncident);
+    setShowRuleModal(true);
+  };
+
+  const handleSaveRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ruleName.trim() || !rulePattern.trim() || !ruleAction.trim()) return;
     try {
-      await addDoc(collection(db, 'automationRules'), {
+      const payload = {
         name: clampString(ruleName, 150),
         triggerEvent: ruleTriggerEvent,
         triggerCategory: clampString(ruleCategory, 100),
@@ -393,31 +411,36 @@ export const AiAutomationView: React.FC<AiAutomationViewProps> = ({
         targetGroup: ruleGroup,
         autoCreateIncident: ruleAutoIncident,
         active: true,
-        triggeredCount: 0,
-        ownerId: uid,
-        memberIds: [uid],
-        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
-      setShowRuleModal(false);
-      setRuleName('');
-      setRulePattern('');
-      setRuleAction('');
+      };
+      if (editingRuleId) await updateDoc(doc(db, 'automationRules', editingRuleId), payload);
+      else await addDoc(collection(db, 'automationRules'), { ...payload, triggeredCount: 0, ownerId: uid, memberIds: [uid], createdAt: serverTimestamp() });
+      setShowRuleModal(false); setEditingRuleId(null); setRuleName(''); setRulePattern(''); setRuleAction('');
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'automationRules');
+      handleFirestoreError(err, editingRuleId ? OperationType.UPDATE : OperationType.CREATE, editingRuleId ? `automationRules/${editingRuleId}` : 'automationRules');
     }
   };
 
-  const handleUpdateSlaTarget = async (policy: SlaPolicy, firstResponseMinutes: number) => {
-    try {
-      await updateDoc(doc(db, 'slaPolicies', policy.id), {
-        firstResponseMinutes: clampInt(firstResponseMinutes, 5, 1440),
-        updatedAt: serverTimestamp(),
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `slaPolicies/${policy.id}`);
-    }
+  const handleDeleteRule = async (rule: AutomationRule) => {
+    if (!window.confirm(`Supprimer la règle ${rule.name} ?`)) return;
+    try { await deleteDoc(doc(db, 'automationRules', rule.id)); }
+    catch (err) { handleFirestoreError(err, OperationType.DELETE, `automationRules/${rule.id}`); }
   };
+
+  const openEditSla = (p: SlaPolicy) => { setEditingSlaId(p.id); setSlaName(p.name); setSlaPriority(p.priorityScope); setSlaFirst(p.firstResponseMinutes); setSlaUpdate(p.updateMinutes); setSlaResolution(p.resolutionMinutes); setShowSlaModal(true); };
+  const openCreateSla = () => { setEditingSlaId(null); setSlaName(''); setSlaPriority('medium'); setSlaFirst(60); setSlaUpdate(120); setSlaResolution(480); setShowSlaModal(true); };
+  const handleSaveSla = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!slaName.trim()) return;
+    try {
+      const payload = { name: clampString(slaName,120), priorityScope: slaPriority, firstResponseMinutes: clampInt(slaFirst,5,1440), updateMinutes: clampInt(slaUpdate,5,2880), resolutionMinutes: clampInt(slaResolution,5,10080), escalationGroup: 'N2 Plateforme', active: true, ownerId: uid, memberIds:[uid], updatedAt: serverTimestamp() };
+      if (editingSlaId) await updateDoc(doc(db,'slaPolicies',editingSlaId), payload);
+      else await addDoc(collection(db,'slaPolicies'), { ...payload, createdAt: serverTimestamp() });
+      setShowSlaModal(false);
+    } catch (err) { handleFirestoreError(err, editingSlaId?OperationType.UPDATE:OperationType.CREATE, editingSlaId?`slaPolicies/${editingSlaId}`:'slaPolicies'); }
+  };
+  const handleDeleteSla = async (p: SlaPolicy) => { if(!window.confirm(`Supprimer ${p.name} ?`)) return; try{await deleteDoc(doc(db,'slaPolicies',p.id));}catch(err){handleFirestoreError(err,OperationType.DELETE,`slaPolicies/${p.id}`);} };
+
+
 
   const handleSimulateAi = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -443,7 +466,7 @@ export const AiAutomationView: React.FC<AiAutomationViewProps> = ({
             csatScore: a.csatScore,
             skills: a.skills,
           })),
-          activeIncidents: ['INC-REL-09 (Hors zone Nord-Est)', 'INC-AUTH-12 (Mots de passe bloqués)'],
+          activeIncidents: tickets.filter((t) => t.isRecurringIncident).slice(0, 5).map((t) => `${t.parentIncidentRef || t.reference} (${t.subject})`),
           smartRoutingPolicy: {
             enabled: smartPolicy.enabled,
             prioritizeTenseSentiment: smartPolicy.prioritizeTenseSentiment,
@@ -972,25 +995,10 @@ export const AiAutomationView: React.FC<AiAutomationViewProps> = ({
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleRunRuleNow(rule)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 rounded-lg cursor-pointer"
-                >
-                  <Play className="w-3.5 h-3.5 text-blue-600" />
-                  <span>Exécuter</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleRule(rule)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border cursor-pointer ${
-                    rule.active
-                      ? 'border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400'
-                      : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  {rule.active ? 'Active' : 'En pause'}
-                </button>
+                <button type="button" onClick={() => handleRunRuleNow(rule)} className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 rounded-lg cursor-pointer"><Play className="w-3.5 h-3.5 text-blue-600" /><span>Exécuter</span></button>
+                <button type="button" onClick={() => openEditRule(rule)} className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer">Modifier</button>
+                <button type="button" onClick={() => handleDeleteRule(rule)} className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 cursor-pointer">Supprimer</button>
+                <button type="button" onClick={() => handleToggleRule(rule)} className={`px-3 py-1.5 text-xs font-medium rounded-lg border cursor-pointer ${rule.active ? 'border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400' : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'}`}>{rule.active ? 'Active' : 'En pause'}</button>
               </div>
             </div>
           ))}
@@ -1071,39 +1079,18 @@ export const AiAutomationView: React.FC<AiAutomationViewProps> = ({
 
         {/* SLA Policies Configuration */}
         <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <Sliders className="w-4 h-4 text-blue-600" />
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Politiques SLA actives
-            </h3>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2"><Sliders className="w-4 h-4 text-blue-600" /><h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Politiques SLA</h3></div>
+            <button type="button" onClick={openCreateSla} className="px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded-lg cursor-pointer">Ajouter</button>
           </div>
-
           <div className="divide-y divide-slate-200 dark:divide-slate-800">
-            {slaPolicies.map((pol) => (
+            {slaPolicies.length === 0 ? <p className="py-6 text-xs text-slate-500">Aucune politique SLA. Créez-en une pour activer le suivi.</p> : slaPolicies.map((pol) => (
               <div key={pol.id} className="py-3 space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-900 dark:text-slate-100">{pol.name}</span>
-                  <span className="font-mono text-slate-500 dark:text-slate-400">
-                    {TICKET_PRIORITY_LABELS[pol.priorityScope]}
-                  </span>
+                <div className="flex items-center justify-between gap-2">
+                  <div><span className="font-semibold text-slate-900 dark:text-slate-100">{pol.name}</span><span className="ml-2 font-mono text-slate-500 dark:text-slate-400">{TICKET_PRIORITY_LABELS[pol.priorityScope]}</span></div>
+                  <div className="flex gap-1"><button type="button" onClick={() => openEditSla(pol)} className="px-2 py-1 border border-slate-200 dark:border-slate-700 rounded cursor-pointer">Modifier</button><button type="button" onClick={() => handleDeleteSla(pol)} className="px-2 py-1 border border-red-200 dark:border-red-900 text-red-600 rounded cursor-pointer">Supprimer</button></div>
                 </div>
-                <div className="flex items-center justify-between gap-2 text-slate-600 dark:text-slate-400">
-                  <span className="inline-flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5" />
-                    1ère réponse (min) :
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={5}
-                      max={1440}
-                      defaultValue={pol.firstResponseMinutes}
-                      onBlur={(e) => handleUpdateSlaTarget(pol, Number(e.target.value))}
-                      className="w-20 px-2 py-1 text-right font-mono tabular-nums bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded"
-                    />
-                    <span className="font-mono text-[11px]">Résol. {pol.resolutionMinutes}m</span>
-                  </div>
-                </div>
+                <div className="text-slate-600 dark:text-slate-400 font-mono tabular-nums">1ère: {pol.firstResponseMinutes}m · MAJ: {pol.updateMinutes}m · Résol: {pol.resolutionMinutes}m</div>
               </div>
             ))}
           </div>
@@ -1111,18 +1098,32 @@ export const AiAutomationView: React.FC<AiAutomationViewProps> = ({
       </div>
 
       {/* Add Automation Rule Modal */}
+      {showSlaModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between"><h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{editingSlaId ? 'Modifier SLA' : 'Nouvelle politique SLA'}</h3><button type="button" onClick={() => setShowSlaModal(false)} className="cursor-pointer"><X className="w-4 h-4 text-slate-500" /></button></div>
+            <form onSubmit={handleSaveSla} className="space-y-3">
+              <input required value={slaName} onChange={(e)=>setSlaName(e.target.value)} placeholder="Nom" className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg" />
+              <select value={slaPriority} onChange={(e)=>setSlaPriority(e.target.value as TicketPriority)} className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"><option value="critical">Critique</option><option value="high">Haute</option><option value="medium">Moyenne</option><option value="low">Basse</option></select>
+              <div className="grid grid-cols-3 gap-2"><input type="number" min={5} value={slaFirst} onChange={(e)=>setSlaFirst(Number(e.target.value))} placeholder="1ère" className="px-2 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-lg" /><input type="number" min={5} value={slaUpdate} onChange={(e)=>setSlaUpdate(Number(e.target.value))} placeholder="MAJ" className="px-2 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-lg" /><input type="number" min={5} value={slaResolution} onChange={(e)=>setSlaResolution(Number(e.target.value))} placeholder="Résol." className="px-2 py-2 text-xs border border-slate-200 dark:border-slate-800 rounded-lg" /></div>
+              <div className="flex justify-end gap-2"><button type="button" onClick={()=>setShowSlaModal(false)} className="px-4 py-2 text-xs cursor-pointer">Annuler</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white text-xs rounded-lg cursor-pointer">Enregistrer</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showRuleModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-                Nouvelle règle d’automatisation
+                {editingRuleId ? 'Modifier la règle' : 'Nouvelle règle d’automatisation'}
               </h3>
-              <button type="button" onClick={() => setShowRuleModal(false)} className="cursor-pointer">
+              <button type="button" onClick={() => { setShowRuleModal(false); setEditingRuleId(null); }} className="cursor-pointer">
                 <X className="w-4 h-4 text-slate-500" />
               </button>
             </div>
-            <form onSubmit={handleCreateRule} className="space-y-3">
+            <form onSubmit={handleSaveRule} className="space-y-3">
               <input
                 type="text"
                 required
@@ -1194,19 +1195,8 @@ export const AiAutomationView: React.FC<AiAutomationViewProps> = ({
                 <span>Créer automatiquement un ticket incident parent</span>
               </label>
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowRuleModal(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-600 cursor-pointer"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
-                >
-                  Enregistrer
-                </button>
+                <button type="button" onClick={() => { setShowRuleModal(false); setEditingRuleId(null); }} className="px-4 py-2 text-xs font-medium text-slate-600 cursor-pointer">Annuler</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer">{editingRuleId ? 'Mettre à jour' : 'Enregistrer'}</button>
               </div>
             </form>
           </div>

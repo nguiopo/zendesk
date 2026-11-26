@@ -41,6 +41,8 @@ interface ClientDetailPanelProps {
   onUnlockPassword: (client: ClientAccount) => void;
   onOutOfZoneCallFollowup: (client: ClientAccount) => void;
   onOpenTicket?: (ticketId: string) => void;
+  onEdit?: (client: ClientAccount) => void;
+  onDelete?: (client: ClientAccount) => void;
 }
 
 type InteractionFilter = 'all' | 'tickets' | 'calls';
@@ -113,6 +115,8 @@ export const ClientDetailPanel: React.FC<ClientDetailPanelProps> = ({
   onUnlockPassword,
   onOutOfZoneCallFollowup,
   onOpenTicket,
+  onEdit,
+  onDelete,
 }) => {
   const dict = I18N[locale].clients;
   const [interactionFilter, setInteractionFilter] = useState<InteractionFilter>('all');
@@ -302,37 +306,11 @@ export const ClientDetailPanel: React.FC<ClientDetailPanelProps> = ({
 
         {/* Quick Proactive Actions */}
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onVerifySituation(client)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <ClipboardCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-            <span>{dict.btnVerify}</span>
-          </button>
-
-          {client.passwordLocked && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onUnlockPassword(client)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <KeyRound className="w-3.5 h-3.5" />
-              <span>{dict.btnUnlock}</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onOutOfZoneCallFollowup(client)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-amber-800 dark:text-amber-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <PhoneOutgoing className="w-3.5 h-3.5" />
-            <span>{dict.btnOutOfZone}</span>
-          </button>
+          <button type="button" disabled={busy} onClick={() => onVerifySituation(client)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"><ClipboardCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /><span>{dict.btnVerify}</span></button>
+          {client.passwordLocked && <button type="button" disabled={busy} onClick={() => onUnlockPassword(client)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg whitespace-nowrap shrink-0 cursor-pointer"><KeyRound className="w-3.5 h-3.5" /><span>{dict.btnUnlock}</span></button>}
+          <button type="button" disabled={busy} onClick={() => onOutOfZoneCallFollowup(client)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-amber-800 dark:text-amber-300 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"><PhoneOutgoing className="w-3.5 h-3.5" /><span>{dict.btnOutOfZone}</span></button>
+          {onEdit && <button type="button" onClick={() => onEdit(client)} className="px-2.5 py-1.5 text-xs font-medium border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer">Modifier</button>}
+          {onDelete && <button type="button" onClick={() => onDelete(client)} className="px-2.5 py-1.5 text-xs font-medium border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 rounded-lg cursor-pointer">Supprimer</button>}
         </div>
       </div>
 

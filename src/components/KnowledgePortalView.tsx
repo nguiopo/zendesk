@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   increment,
   serverTimestamp,
@@ -99,6 +100,7 @@ export const KnowledgePortalView: React.FC<KnowledgePortalViewProps> = ({
   const [kbTypeFilter, setKbTypeFilter] = useState<'all' | KbArticleType>('all');
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [showArticleModal, setShowArticleModal] = useState(false);
+  const [editingArticleId, setEditingArticleId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!externalSearchRequest) return;
@@ -243,18 +245,16 @@ export const KnowledgePortalView: React.FC<KnowledgePortalViewProps> = ({
     }
   };
 
-  const handleCreateArticle = async (e: React.FormEvent) => {
+  const openCreateArticle = () => { setEditingArticleId(null); setArtTitle(''); setArtSummary(''); setArtBody(''); setArtCategory('Mot de passe bloqué'); setArtLang(locale); setArtType('guide'); setArtTags(''); setShowArticleModal(true); };
+  const openEditArticle = (art: KbArticle) => { setEditingArticleId(art.id); setArtTitle(art.title); setArtSummary(art.summary); setArtBody(art.body); setArtCategory(art.category); setArtLang(art.language); setArtType(art.articleType); setArtTags(art.tags.join(', ')); setShowArticleModal(true); };
+
+  const handleSaveArticle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!artTitle.trim() || !artBody.trim()) return;
     setSavingArticle(true);
     try {
-      const tagsList = clampTags(
-        artTags
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean)
-      );
-      const created = await addDoc(collection(db, 'kbArticles'), {
+      const tagsList = clampTags(artTags.split(',').map((t) => t.trim()).filter(Boolean));
+      const payload = {
         title: clampString(artTitle, 200),
         summary: clampString(artSummary || artBody.slice(0, 180), 500),
         body: clampString(artBody, 6000),
@@ -262,35 +262,20 @@ export const KnowledgePortalView: React.FC<KnowledgePortalViewProps> = ({
         language: artLang,
         articleType: artType,
         tags: tagsList.length > 0 ? tagsList : ['guide'],
-        published: true,
-        viewsCount: 1,
-        deflectionsCount: 0,
-        helpfulCount: 0,
-        authorName: clampString(currentUserName, 120, 'Support Lead'),
-        ownerId: uid,
-        memberIds: [uid],
-        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
-      await recordAuditLog({
-        uid,
-        actorName: currentUserName,
-        actorRole: 'admin',
-        action: 'Création article base de connaissances',
-        category: 'kb',
-        targetLabel: clampString(artTitle, 180),
-        details: `Type ${artType} · Langue ${artLang.toUpperCase()}`,
-      });
-      setSelectedArticleId(created.id);
-      setShowArticleModal(false);
-      setArtTitle('');
-      setArtSummary('');
-      setArtBody('');
+      };
+      if (editingArticleId) {
+        await updateDoc(doc(db, 'kbArticles', editingArticleId), payload);
+        await recordAuditLog({ uid, actorName: currentUserName, actorRole: 'admin', action: 'Mise à jour article KB', category: 'kb', targetLabel: clampString(artTitle, 180), details: `Type ${artType} — Langue ${artLang.toUpperCase()}` });
+      } else {
+        const created = await addDoc(collection(db, 'kbArticles'), { ...payload, published: true, viewsCount: 1, deflectionsCount: 0, helpfulCount: 0, authorName: clampString(currentUserName, 120, 'Support Lead'), ownerId: uid, memberIds: [uid], createdAt: serverTimestamp() });
+        await recordAuditLog({ uid, actorName: currentUserName, actorRole: 'admin', action: 'Création article base de connaissances', category: 'kb', targetLabel: clampString(artTitle, 180), details: `Type ${artType} — Langue ${artLang.toUpperCase()}` });
+        setSelectedArticleId(created.id);
+      }
+      setShowArticleModal(false); setEditingArticleId(null);
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'kbArticles');
-    } finally {
-      setSavingArticle(false);
-    }
+      handleFirestoreError(err, editingArticleId ? OperationType.UPDATE : OperationType.CREATE, editingArticleId ? `kbArticles/${editingArticleId}` : 'kbArticles');
+    } finally { setSavingArticle(false); }
   };
 
   const handleDeflectFromPortal = async (article: KbArticle) => {
@@ -307,6 +292,25 @@ export const KnowledgePortalView: React.FC<KnowledgePortalViewProps> = ({
       setPortalDescription('');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `kbArticles/${article.id}`);
+    }
+  };
+
+  const handleDeleteArticle = async (article: KbArticle) => {
+    if (!window.confirm(`Supprimer l'article "${article.title}" ?`)) return;
+    try {
+      await deleteDoc(doc(db, 'kbArticles', article.id));
+      if (selectedArticleId === article.id) setSelectedArticleId(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `kbArticles/${article.id}`);
+    }
+  };
+
+  const handleDeleteTopic = async (topic: ForumTopic) => {
+    if (!window.confirm(`Supprimer le sujet "${topic.title}" ?`)) return;
+    try {
+      await deleteDoc(doc(db, 'forumTopics', topic.id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `forumTopics/${topic.id}`);
     }
   };
 
@@ -598,7 +602,7 @@ export const KnowledgePortalView: React.FC<KnowledgePortalViewProps> = ({
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setShowArticleModal(true)}
+                  onClick={openCreateArticle}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer whitespace-nowrap"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -724,21 +728,10 @@ export const KnowledgePortalView: React.FC<KnowledgePortalViewProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleMarkHelpful(activeArticle)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold rounded-lg cursor-pointer"
-                    >
-                      <ThumbsUp className="w-3.5 h-3.5 text-blue-600" />
-                      <span>Utile ({activeArticle.helpfulCount})</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleTogglePublished(activeArticle)}
-                      className="px-3 py-1.5 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs font-semibold rounded-lg cursor-pointer"
-                    >
-                      {activeArticle.published ? 'Passer en brouillon' : 'Publier'}
-                    </button>
+                    <button type="button" onClick={() => handleMarkHelpful(activeArticle)} className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold rounded-lg cursor-pointer"><ThumbsUp className="w-3.5 h-3.5 text-blue-600" /><span>Utile ({activeArticle.helpfulCount})</span></button>
+                    <button type="button" onClick={() => openEditArticle(activeArticle)} className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-lg cursor-pointer">Modifier</button>
+                    <button type="button" onClick={() => handleTogglePublished(activeArticle)} className="px-3 py-1.5 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs font-semibold rounded-lg cursor-pointer">{activeArticle.published ? 'Passer en brouillon' : 'Publier'}</button>
+                    <button type="button" onClick={() => handleDeleteArticle(activeArticle)} className="px-3 py-1.5 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg cursor-pointer">Supprimer</button>
                   </div>
                 </div>
 
@@ -1059,21 +1052,9 @@ export const KnowledgePortalView: React.FC<KnowledgePortalViewProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => handleUpvoteTopic(tp)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-mono font-semibold rounded-lg cursor-pointer"
-                    >
-                      <ThumbsUp className="w-3.5 h-3.5 text-blue-600" />
-                      <span>{tp.upvotes}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleMarkTopicAnswered(tp)}
-                      className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
-                    >
-                      {tp.status === 'answered' ? 'Rouvrir' : 'Valider réponse'}
-                    </button>
+                    <button type="button" onClick={() => handleUpvoteTopic(tp)} className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-mono font-semibold rounded-lg cursor-pointer"><ThumbsUp className="w-3.5 h-3.5 text-blue-600" /><span>{tp.upvotes}</span></button>
+                    <button type="button" onClick={() => handleMarkTopicAnswered(tp)} className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 text-xs font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">{tp.status === 'answered' ? 'Rouvrir' : 'Valider réponse'}</button>
+                    <button type="button" onClick={() => handleDeleteTopic(tp)} className="px-3 py-1.5 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 text-xs font-medium rounded-lg cursor-pointer">Supprimer</button>
                   </div>
                 </div>
 
@@ -1114,14 +1095,14 @@ export const KnowledgePortalView: React.FC<KnowledgePortalViewProps> = ({
         <div className="fixed inset-0 z-50 bg-slate-950/50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-lg w-full p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">
-                Publier un article ou une FAQ multilingue
+              <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                {editingArticleId ? 'Modifier l’article' : 'Nouvel article de base de connaissances'}
               </h3>
-              <button type="button" onClick={() => setShowArticleModal(false)} className="cursor-pointer">
+              <button type="button" onClick={() => { setShowArticleModal(false); setEditingArticleId(null); }} className="cursor-pointer">
                 <X className="w-4 h-4 text-slate-500" />
               </button>
             </div>
-            <form onSubmit={handleCreateArticle} className="space-y-3">
+            <form onSubmit={handleSaveArticle} className="space-y-3">
               <label className="block space-y-1">
                 <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Titre</span>
                 <input
@@ -1207,20 +1188,8 @@ export const KnowledgePortalView: React.FC<KnowledgePortalViewProps> = ({
               </label>
 
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowArticleModal(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingArticle}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
-                >
-                  {savingArticle ? 'Publication...' : 'Publier dans la KB'}
-                </button>
+                <button type="button" onClick={() => { setShowArticleModal(false); setEditingArticleId(null); }} className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer">Annuler</button>
+                <button type="submit" disabled={savingArticle} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer">{savingArticle ? 'Enregistrement...' : editingArticleId ? 'Mettre à jour' : 'Publier dans la KB'}</button>
               </div>
             </form>
           </div>

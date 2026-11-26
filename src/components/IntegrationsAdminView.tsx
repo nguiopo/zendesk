@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   increment,
   serverTimestamp,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
+  AgentAvailability,
   AppLocale,
   AuditLogEntry,
   CallLog,
@@ -36,6 +38,8 @@ import {
   CsatSurvey,
   ExternalIntegration,
   RbacPermissionKey,
+  SupportAgent,
+  SupportGroup,
   Ticket,
   UserRoleKey,
   WorkspaceConfig,
@@ -63,6 +67,7 @@ interface IntegrationsAdminViewProps {
   tickets: Ticket[];
   callLogs: CallLog[];
   csatSurveys: CsatSurvey[];
+  agents: SupportAgent[];
 }
 
 const PERMISSION_LABELS: { key: RbacPermissionKey; label: string; scope: string }[] = [
@@ -91,6 +96,8 @@ const DEFAULT_PERMS: Record<UserRoleKey, RbacPermissionKey[]> = {
   ],
 };
 
+const AGENT_GROUPS: SupportGroup[] = ['N1 Accès & Comptes', 'N2 Plateforme', 'N3 Infrastructure', 'Relation Client & CTI'];
+
 export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
   uid,
   currentUserName,
@@ -103,9 +110,19 @@ export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
   tickets,
   callLogs,
   csatSurveys,
+  agents,
 }) => {
   const dict = I18N[locale].admin;
-  const [subTab, setSubTab] = useState<'marketplace' | 'webhooks' | 'rbac' | 'gdpr'>('marketplace');
+  const [subTab, setSubTab] = useState<'marketplace' | 'webhooks' | 'rbac' | 'gdpr' | 'agents'>('marketplace');
+  const [showAgentModal, setShowAgentModal] = useState(false);
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [agentName, setAgentName] = useState('');
+  const [agentRoleTitle, setAgentRoleTitle] = useState('Agent Support');
+  const [agentGroup, setAgentGroup] = useState<SupportGroup>('N1 Accès & Comptes');
+  const [agentAvailability, setAgentAvailability] = useState<AgentAvailability>('available');
+  const [agentMaxTickets, setAgentMaxTickets] = useState(8);
+  const [agentSkills, setAgentSkills] = useState('');
+  const [savingAgent, setSavingAgent] = useState(false);
 
   // Webhook creation & testing state
   const [showWebhookModal, setShowWebhookModal] = useState(false);
@@ -493,6 +510,77 @@ export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
     }
   };
 
+  const resetAgentForm = () => {
+    setEditingAgentId(null);
+    setAgentName('');
+    setAgentRoleTitle('Agent Support');
+    setAgentGroup('N1 Accès & Comptes');
+    setAgentAvailability('available');
+    setAgentMaxTickets(8);
+    setAgentSkills('');
+  };
+
+  const openCreateAgent = () => { resetAgentForm(); setShowAgentModal(true); };
+  const openEditAgent = (agent: SupportAgent) => {
+    setEditingAgentId(agent.id);
+    setAgentName(agent.name);
+    setAgentRoleTitle(agent.roleTitle);
+    setAgentGroup(agent.group);
+    setAgentAvailability(agent.availability);
+    setAgentMaxTickets(agent.maxConcurrentTickets || 8);
+    setAgentSkills(agent.skills || '');
+    setShowAgentModal(true);
+  };
+
+  const handleSaveAgent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!agentName.trim()) return;
+    setSavingAgent(true);
+    try {
+      const payload = {
+        name: clampString(agentName, 120),
+        roleTitle: clampString(agentRoleTitle, 120),
+        group: agentGroup,
+        availability: agentAvailability,
+        maxConcurrentTickets: Math.max(1, Math.min(100, Math.round(agentMaxTickets))),
+        activeTickets: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.activeTickets || 0 : 0,
+        callsHandled: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.callsHandled || 0 : 0,
+        avgCallDurationSec: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.avgCallDurationSec || 0 : 0,
+        situationChecks: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.situationChecks || 0 : 0,
+        platformUsageScore: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.platformUsageScore || 80 : 80,
+        clientAssistanceCount: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.clientAssistanceCount || 0 : 0,
+        passwordUnlocksCount: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.passwordUnlocksCount || 0 : 0,
+        outOfZoneFollowups: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.outOfZoneFollowups || 0 : 0,
+        slaCompliancePct: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.slaCompliancePct || 100 : 100,
+        csatScore: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.csatScore || 4.5 : 4.5,
+        skills: clampString(agentSkills, 300),
+        ownerId: uid,
+        memberIds: [uid],
+        updatedAt: serverTimestamp(),
+      };
+      if (editingAgentId) {
+        await updateDoc(doc(db, 'agents', editingAgentId), payload);
+      } else {
+        await addDoc(collection(db, 'agents'), { ...payload, createdAt: serverTimestamp() });
+      }
+      setShowAgentModal(false);
+      resetAgentForm();
+    } catch (err) {
+      handleFirestoreError(err, editingAgentId ? OperationType.UPDATE : OperationType.CREATE, editingAgentId ? `agents/${editingAgentId}` : 'agents');
+    } finally {
+      setSavingAgent(false);
+    }
+  };
+
+  const handleDeleteAgent = async (agent: SupportAgent) => {
+    if (!window.confirm(`Supprimer l'agent ${agent.name} ?`)) return;
+    try {
+      await deleteDoc(doc(db, 'agents', agent.id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `agents/${agent.id}`);
+    }
+  };
+
   const handleSaveRetention = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingRetention(true);
@@ -678,6 +766,7 @@ export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
               ['webhooks', dict.tabWebhooks, Webhook],
               ['rbac', dict.tabRbac, UserCog],
               ['gdpr', dict.tabGdpr, FileLock2],
+              ['agents', 'Agents', UserCog],
             ] as const
           ).map(([id, label, Icon]) => (
             <button
@@ -1367,6 +1456,69 @@ export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
                 })
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {subTab === 'agents' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-display text-sm font-semibold text-slate-900 dark:text-slate-100">Gestion des agents</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Créez et gérez les agents dynamiquement. Aucune donnée démo.</p>
+            </div>
+            <button type="button" onClick={openCreateAgent} className="inline-flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer">
+              <Plus className="w-3.5 h-3.5" /> Nouvel agent
+            </button>
+          </div>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+            {agents.length === 0 ? (
+              <div className="p-8 text-center text-sm text-slate-500 dark:text-slate-400">Aucun agent. Créez votre premier agent pour activer l’assignation, l’astreinte et les analytics.</div>
+            ) : (
+              <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                {agents.map((agent) => (
+                  <div key={agent.id} className="p-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{agent.name}</span>
+                        <span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">{agent.group}</span>
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">{agent.availability}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{agent.roleTitle} · Capacité {agent.activeTickets}/{agent.maxConcurrentTickets}{agent.skills ? ` · ${agent.skills}` : ''}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => openEditAgent(agent)} className="px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer">Modifier</button>
+                      <button type="button" onClick={() => handleDeleteAgent(agent)} className="px-3 py-1.5 text-xs border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 rounded-lg cursor-pointer">Supprimer</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showAgentModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-display text-base font-bold text-slate-900 dark:text-slate-100">{editingAgentId ? 'Modifier l’agent' : 'Nouvel agent'}</h3>
+              <button type="button" onClick={() => setShowAgentModal(false)} className="cursor-pointer"><X className="w-4 h-4 text-slate-500" /></button>
+            </div>
+            <form onSubmit={handleSaveAgent} className="space-y-3">
+              <label className="block space-y-1"><span className="text-xs font-medium">Nom</span><input required value={agentName} onChange={(e) => setAgentName(e.target.value)} className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg" /></label>
+              <label className="block space-y-1"><span className="text-xs font-medium">Rôle</span><input required value={agentRoleTitle} onChange={(e) => setAgentRoleTitle(e.target.value)} className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg" /></label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block space-y-1"><span className="text-xs font-medium">Groupe</span><select value={agentGroup} onChange={(e) => setAgentGroup(e.target.value as SupportGroup)} className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg">{AGENT_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}</select></label>
+                <label className="block space-y-1"><span className="text-xs font-medium">Disponibilité</span><select value={agentAvailability} onChange={(e) => setAgentAvailability(e.target.value as AgentAvailability)} className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"><option value="available">Disponible</option><option value="busy">Occupé</option><option value="on_call">Astreinte</option><option value="in_call">En appel</option><option value="off_duty">Absent</option></select></label>
+              </div>
+              <label className="block space-y-1"><span className="text-xs font-medium">Capacité max tickets</span><input type="number" min={1} max={100} value={agentMaxTickets} onChange={(e) => setAgentMaxTickets(Number(e.target.value))} className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg" /></label>
+              <label className="block space-y-1"><span className="text-xs font-medium">Compétences</span><input value={agentSkills} onChange={(e) => setAgentSkills(e.target.value)} className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg" /></label>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowAgentModal(false)} className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 cursor-pointer">Annuler</button>
+                <button type="submit" disabled={savingAgent} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer">{savingAgent ? 'Enregistrement...' : 'Enregistrer'}</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

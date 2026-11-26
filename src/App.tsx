@@ -39,7 +39,6 @@ import {
   X,
 } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType, testConnection } from './firebase';
-import { ensureUserWorkspaceSeeded } from './data/seedData';
 import { useCollaborationSocket } from './hooks/useCollaborationSocket';
 import { I18N, isValidLocale, loadSavedLocale, saveLocale, UI_LOCALE_OPTIONS } from './lib/i18n';
 import {
@@ -163,7 +162,6 @@ function buildNavGroups(locale: AppLocale): {
 function HelpdeskShell() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const [activeTab, setActiveTab] = useState<NavTab>('tickets');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemePreferenceMode>(() => loadSavedThemeMode());
@@ -224,7 +222,6 @@ function HelpdeskShell() {
   });
   const [highPriorityToasts, setHighPriorityToasts] = useState<HighPriorityTicketToast[]>([]);
 
-  const seedingRef = useRef(false);
   const ticketsInitializedRef = useRef(false);
   const seenTicketIdsRef = useRef<Set<string>>(new Set());
   const toastTimersRef = useRef<Map<string, number>>(new Map());
@@ -329,13 +326,25 @@ function HelpdeskShell() {
       setUser(firebaseUser);
       setAuthReady(true);
       if (firebaseUser) {
-        seedingRef.current = true;
-        setSeeding(true);
+        const uid = firebaseUser.uid;
+        const profileRef = doc(db, 'users', uid, 'public', 'profile');
         try {
-          await ensureUserWorkspaceSeeded(firebaseUser);
-        } finally {
-          seedingRef.current = false;
-          setSeeding(false);
+          await setDoc(profileRef, {
+            uid,
+            displayName: (firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Agent Support').slice(0, 120),
+            role: 'supervisor',
+            department: 'Centre Support & Opérations',
+            ...(firebaseUser.photoURL ? { avatarUrl: firebaseUser.photoURL.slice(0, 500) } : {}),
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+          await setDoc(doc(db, 'users', uid, 'private', 'info'), {
+            uid,
+            email: (firebaseUser.email || '').slice(0, 200),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.WRITE, `users/${uid}`);
         }
       }
     });
@@ -345,6 +354,10 @@ function HelpdeskShell() {
   // Attach Firestore real-time listeners strictly when authenticated
   useEffect(() => {
     if (!authReady || !user) {
+      setAgents([]); setClients([]); setTickets([]); setSlaPolicies([]); setShifts([]);
+      setLeaves([]); setRules([]); setCallLogs([]); setKbArticles([]); setForumTopics([]);
+      setCsatSurveys([]); setQaEvaluations([]); setWfmShifts([]); setIntegrations([]);
+      setWorkspaceConfigs([]); setAuditLogs([]); setChartAnnotations([]); setOnCallReports([]); setKbPdfDocuments([]);
       ticketsInitializedRef.current = false;
       seenTicketIdsRef.current.clear();
       setHighPriorityToasts([]);
@@ -410,7 +423,7 @@ function HelpdeskShell() {
           if (seenTicketIdsRef.current.has(change.doc.id)) return;
           seenTicketIdsRef.current.add(change.doc.id);
 
-          if (seedingRef.current) return;
+
           const createdTicket: Ticket = {
             id: change.doc.id,
             ...(change.doc.data() as Omit<Ticket, 'id'>),
@@ -575,7 +588,7 @@ function HelpdeskShell() {
             {
               uid: user.uid,
               displayName: (user.displayName || user.email?.split('@')[0] || 'Agent Support').slice(0, 120),
-              role: user.email === 'camillenguiopo@gmail.com' ? 'admin' : 'supervisor',
+              role: 'supervisor',
               department: 'Centre Support & Opérations',
               themeMode: nextMode,
               updatedAt: serverTimestamp(),
@@ -608,7 +621,7 @@ function HelpdeskShell() {
             {
               uid: user.uid,
               displayName: (user.displayName || user.email?.split('@')[0] || 'Agent Support').slice(0, 120),
-              role: user.email === 'camillenguiopo@gmail.com' ? 'admin' : 'supervisor',
+              role: 'supervisor',
               department: 'Centre Support & Opérations',
               themeMode,
               preferredLocale: nextLocale,
@@ -715,7 +728,7 @@ function HelpdeskShell() {
   }, []);
 
   useEffect(() => {
-    if (!authReady || !user || seeding || !weeklyReportsLoaded || !weeklyAutoEnabled) return;
+    if (!authReady || !user || !weeklyReportsLoaded || !weeklyAutoEnabled) return;
     if (tickets.length === 0) return;
     const currentWeek = getRecentIsoWeeks(1)[0];
     if (!currentWeek) return;
@@ -729,7 +742,6 @@ function HelpdeskShell() {
   }, [
     authReady,
     user,
-    seeding,
     weeklyReportsLoaded,
     weeklyAutoEnabled,
     tickets.length,
@@ -1300,10 +1312,10 @@ function HelpdeskShell() {
 
         {/* Main Viewport */}
         <main className={`flex-1 p-4 md:p-6 overflow-y-auto ${isFullscreenWorkspace ? '' : 'pt-4'}`}>
-          {seeding && tickets.length === 0 ? (
-            <div className="p-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
-              <div className="h-5 w-48 bg-slate-200 dark:bg-slate-800 rounded animate-pulse" />
-              <div className="h-4 w-80 bg-slate-100 dark:bg-slate-800/60 rounded animate-pulse" />
+          {tickets.length === 0 && clients.length === 0 && agents.length === 0 && !ticketsInitializedRef.current ? (
+            <div className="p-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Espace vide</h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Créez vos agents, clients et règles depuis les modules pour commencer. Les données sont synchronisées en temps réel avec Firebase.</p>
             </div>
           ) : (
             <motion.div
@@ -1444,6 +1456,7 @@ function HelpdeskShell() {
                   tickets={tickets}
                   callLogs={callLogs}
                   csatSurveys={csatSurveys}
+                  agents={agents}
                 />
               )}
             </motion.div>

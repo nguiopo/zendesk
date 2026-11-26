@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { addDoc, collection, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import {
   Award,
   BarChart3,
@@ -435,7 +435,7 @@ export const QualityCsatPanel: React.FC<QualityCsatPanelProps> = ({
 }) => {
   const [showQaModal, setShowQaModal] = useState(false);
   const [qaAgentId, setQaAgentId] = useState(agents[0]?.id || '');
-  const [qaTicketRef, setQaTicketRef] = useState(tickets[0]?.reference || 'ZD-2041');
+  const [qaTicketRef, setQaTicketRef] = useState(tickets[0]?.reference || '');
   const [greetingScore, setGreetingScore] = useState(23);
   const [diagnosticScore, setDiagnosticScore] = useState(22);
   const [slaComplianceScore, setSlaComplianceScore] = useState(24);
@@ -482,7 +482,7 @@ export const QualityCsatPanel: React.FC<QualityCsatPanelProps> = ({
       await addDoc(collection(db, 'qaEvaluations'), {
         agentId: ag.id,
         agentName: clampString(ag.name, 120),
-        ticketRef: clampString(qaTicketRef || 'ZD-2041', 40),
+        ticketRef: clampString(qaTicketRef || tickets[0]?.reference || 'N/A', 40),
         reviewerName: clampString(currentUserName, 120),
         greetingScore: g,
         diagnosticScore: d,
@@ -545,6 +545,9 @@ export const QualityCsatPanel: React.FC<QualityCsatPanelProps> = ({
       setSavingCsat(false);
     }
   };
+
+  const handleDeleteQa = async (qa: QaEvaluation) => { if (!window.confirm('Supprimer cette évaluation QA ?')) return; try { await deleteDoc(doc(db, 'qaEvaluations', qa.id)); } catch (err) { handleFirestoreError(err, OperationType.DELETE, `qaEvaluations/${qa.id}`); } };
+  const handleDeleteCsat = async (csat: CsatSurvey) => { if (!window.confirm('Supprimer cette enquête CSAT ?')) return; try { await deleteDoc(doc(db, 'csatSurveys', csat.id)); } catch (err) { handleFirestoreError(err, OperationType.DELETE, `csatSurveys/${csat.id}`); } };
 
   return (
     <div className="space-y-6">
@@ -662,10 +665,10 @@ export const QualityCsatPanel: React.FC<QualityCsatPanelProps> = ({
                 </div>
 
                 <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">{qa.feedback}</p>
-                <p className="text-[11px] font-medium text-violet-700 dark:text-violet-300 flex items-center gap-1.5">
-                  <GraduationCap className="w-3.5 h-3.5 shrink-0" />
-                  <span>Besoin formation : {qa.trainingNeed}</span>
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-medium text-violet-700 dark:text-violet-300 flex items-center gap-1.5"><GraduationCap className="w-3.5 h-3.5 shrink-0" /><span>Besoin formation : {qa.trainingNeed}</span></p>
+                  <button type="button" onClick={() => handleDeleteQa(qa)} className="text-[11px] text-red-600 dark:text-red-400 cursor-pointer">Supprimer</button>
+                </div>
               </div>
             ))}
           </div>
@@ -704,9 +707,10 @@ export const QualityCsatPanel: React.FC<QualityCsatPanelProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">{csat.comment}</p>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Agent : {csat.agentName} · Canal : {csat.channel}
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">Agent : {csat.agentName} · Canal : {csat.channel}</p>
+                  <button type="button" onClick={() => handleDeleteCsat(csat)} className="text-[11px] text-red-600 dark:text-red-400 cursor-pointer">Supprimer</button>
+                </div>
               </div>
             ))}
           </div>
@@ -1052,6 +1056,8 @@ export const WfmSchedulePanel: React.FC<WfmSchedulePanelProps> = ({
     }
   };
 
+  const handleDeleteWfmShift = async (shift: WfmShift) => { if (!window.confirm('Supprimer ce shift WFM ?')) return; try { await deleteDoc(doc(db, 'wfmShifts', shift.id)); } catch (err) { handleFirestoreError(err, OperationType.DELETE, `wfmShifts/${shift.id}`); } };
+
   return (
     <div className="space-y-6">
       {/* WFM Summary Cards */}
@@ -1186,15 +1192,10 @@ export const WfmSchedulePanel: React.FC<WfmSchedulePanelProps> = ({
                   <td className="py-3 px-4 text-right font-mono tabular-nums">{sh.plannedHours}h</td>
                   <td className="py-3 px-4 text-right font-mono tabular-nums">{sh.forecastTickets} tks</td>
                   <td className="py-3 px-4 text-right">
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={sh.adherencePct}
-                      onChange={(e) => handleUpdateAdherence(sh, Number(e.target.value))}
-                      aria-label={`Adhérence ${sh.agentName}`}
-                      className="w-16 px-2 py-1 text-right font-mono text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-md"
-                    />
+                    <div className="inline-flex items-center gap-2">
+                      <input type="number" min={0} max={100} value={sh.adherencePct} onChange={(e) => handleUpdateAdherence(sh, Number(e.target.value))} aria-label={`Adhérence ${sh.agentName}`} className="w-16 px-2 py-1 text-right font-mono text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-md" />
+                      <button type="button" onClick={() => handleDeleteWfmShift(sh)} className="text-[11px] text-red-600 dark:text-red-400 cursor-pointer">Supprimer</button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -49,24 +49,7 @@ interface TeamChatMessage {
 }
 
 const presenceMap = new Map<WebSocket, PresenceState>();
-const teamChatHistory: TeamChatMessage[] = [
-  {
-    id: 'msg-init-1',
-    authorName: 'Claire Moreau',
-    authorRole: 'Lead N2 Plateforme',
-    ticketRef: 'ZD-2041',
-    body: 'Attention équipe : hausse des signalements "hors zone" sur le secteur Nord-Est depuis 10h15. Thomas vérifie le relais primaire.',
-    createdAt: new Date(Date.now() - 28 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 'msg-init-2',
-    authorName: 'Thomas Laurent',
-    authorRole: 'Astreinte N3 Infra',
-    ticketRef: 'ZD-2041',
-    body: 'Relais Nord-Est confirmé en dégradation partielle. Règle d’automatisation activée pour regrouper les tickets enfants.',
-    createdAt: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
-  },
-];
+const teamChatHistory: TeamChatMessage[] = [];
 
 function broadcastWs(wss: WebSocketServer, payload: Record<string, unknown>, exclude?: WebSocket) {
   const data = JSON.stringify(payload);
