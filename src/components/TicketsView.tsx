@@ -46,7 +46,9 @@ import {
   TrendingUp,
   UserCheck,
   X,
+  Paperclip,
 } from 'lucide-react';
+import { uploadToCloudinary } from '../lib/cloudinary';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
@@ -229,6 +231,8 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
   const [events, setEvents] = useState<TicketEvent[]>([]);
   const [composerMode, setComposerMode] = useState<'public' | 'internal'>('public');
   const [composerText, setComposerText] = useState('');
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [submittingNote, setSubmittingNote] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiDraftLoading, setAiDraftLoading] = useState(false);
@@ -933,17 +937,31 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
 
   const handleSendTimelineMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!activeTicket || !composerText.trim()) return;
+    if (!activeTicket || (!composerText.trim() && pendingFiles.length === 0)) return;
     setSubmittingNote(true);
+    setAttachError(null);
     const eventsPath = `tickets/${activeTicket.id}/events`;
     try {
+      // Les fichiers vont sur Cloudinary, seuls les liens sont stockés dans Firestore
+      const attachments: Array<{ name: string; url: string; publicId: string; bytes: number }> = [];
+      for (const file of pendingFiles) {
+        const up = await uploadToCloudinary(file, 'ticket-attachments', file.name);
+        attachments.push({
+          name: file.name.slice(0, 200),
+          url: up.url.slice(0, 500),
+          publicId: up.publicId.slice(0, 300),
+          bytes: up.bytes,
+        });
+      }
+
       await addDoc(collection(db, eventsPath), {
         ticketId: activeTicket.id,
         authorName: clampString(currentUserName, 120, 'Agent'),
         authorRole: 'agent',
         visibility: composerMode,
         eventType: composerMode === 'internal' ? 'note' : 'reply',
-        body: clampString(composerText, 4000),
+        body: clampString(composerText.trim() || 'Pièce(s) jointe(s)', 4000),
+        ...(attachments.length > 0 ? { attachments } : {}),
         ownerId: uid,
         memberIds: [uid],
         createdAt: serverTimestamp(),
@@ -958,6 +976,7 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
       }
 
       setComposerText('');
+      setPendingFiles([]);
       onPresenceTicketChange(activeTicket.id, null);
       onBroadcastActivity(
         activeTicket.id,
@@ -965,7 +984,11 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
         composerMode === 'internal' ? 'a ajouté une note interne' : 'a répondu au client'
       );
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, eventsPath);
+      if (err instanceof Error && /cloudinary|signature|authentification|envoi/i.test(err.message)) {
+        setAttachError(err.message);
+      } else {
+        handleFirestoreError(err, OperationType.CREATE, eventsPath);
+      }
     } finally {
       setSubmittingNote(false);
     }
@@ -3813,6 +3836,22 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                     <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
                       {evt.body}
                     </p>
+                    {evt.attachments && evt.attachments.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {evt.attachments.map((att) => (
+                          <a
+                            key={att.publicId}
+                            href={att.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded-md border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                          >
+                            <Paperclip className="w-3 h-3" />
+                            <span className="max-w-[200px] truncate">{att.name}</span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -4071,14 +4110,57 @@ export const TicketsView: React.FC<TicketsViewProps> = ({
                 className="w-full p-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
 
+              {pendingFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {pendingFiles.map((f, i) => (
+                    <span
+                      key={`${f.name}-${i}`}
+                      className="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200"
+                    >
+                      <Paperclip className="w-3 h-3" />
+                      <span className="max-w-[160px] truncate">{f.name}</span>
+                      <button
+                        type="button"
+                        aria-label={`Retirer ${f.name}`}
+                        onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {attachError && <p className="text-xs text-red-600 dark:text-red-400">{attachError}</p>}
+
               <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer hover:text-slate-900 dark:hover:text-slate-100">
+                    <Paperclip className="w-3.5 h-3.5" />
+                    <span>Joindre</span>
+                    <input
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => {
+                        const picked = Array.from(e.target.files ?? []);
+                        e.target.value = '';
+                        const tooBig = picked.find((f) => f.size > 10 * 1024 * 1024);
+                        if (tooBig) {
+                          setAttachError(`${tooBig.name} dépasse 10 Mo.`);
+                          return;
+                        }
+                        setAttachError(null);
+                        setPendingFiles((prev) => [...prev, ...picked].slice(0, 5));
+                      }}
+                    />
+                  </label>
                   <UserCheck className="w-3.5 h-3.5" />
                   <span>Signé par {currentUserName}</span>
                 </div>
                 <button
                   type="submit"
-                  disabled={submittingNote || !composerText.trim()}
+                  disabled={submittingNote || (!composerText.trim() && pendingFiles.length === 0)}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-[0_1px_2px_rgba(37,99,235,0.2)]"
                 >
                   <Send className="w-3.5 h-3.5" />

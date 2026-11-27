@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { uploadToCloudinary } from '../lib/cloudinary';
 import { ThemePreferenceMode, UserProfileDoc, UserRoleKey } from '../types/helpdesk';
 import {
   getThemeDiagnostics,
@@ -58,6 +59,7 @@ export const AgentProfileModal: React.FC<AgentProfileModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -133,6 +135,42 @@ export const AgentProfileModal: React.FC<AgentProfileModalProps> = ({
     }
   };
 
+  const handleAvatarFile = async (file: File) => {
+    setSaveError(null);
+    setSaveMessage(null);
+    if (!file.type.startsWith('image/')) {
+      setSaveError('Veuillez choisir une image (JPG, PNG, WebP...).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setSaveError('L’image dépasse 5 Mo.');
+      return;
+    }
+    setUploadingAvatar(true);
+    try {
+      // Le fichier est hébergé sur Cloudinary, seul le lien est stocké dans Firestore
+      const up = await uploadToCloudinary(file, 'avatars', file.name);
+      await setDoc(
+        doc(db, 'users', uid, 'public', 'profile'),
+        {
+          uid,
+          displayName: (displayName.trim() || fallbackName || 'Agent Support').slice(0, 120),
+          role,
+          department: (department.trim() || 'Centre Support & Opérations').slice(0, 80),
+          avatarUrl: up.url.slice(0, 500),
+          themeMode,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      setSaveMessage('Photo de profil mise à jour.');
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Impossible d’envoyer la photo.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-[2px] flex items-center justify-center p-4"
@@ -171,6 +209,35 @@ export const AgentProfileModal: React.FC<AgentProfileModalProps> = ({
         </div>
 
         <form onSubmit={handleSaveProfile} className="space-y-5">
+          {/* Avatar (Cloudinary) */}
+          <div className="flex items-center gap-4">
+            {profile?.avatarUrl ? (
+              <img
+                src={profile.avatarUrl}
+                alt="Photo de profil"
+                referrerPolicy="no-referrer"
+                className="w-14 h-14 rounded-full object-cover border border-slate-200 dark:border-slate-700"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
+                <UserCog className="w-6 h-6" />
+              </div>
+            )}
+            <label className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+              <span>{uploadingAvatar ? 'Envoi...' : 'Changer la photo'}</span>
+              <input
+                type="file"
+                accept="image/*"
+                disabled={uploadingAvatar}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = '';
+                  if (f) void handleAvatarFile(f);
+                }}
+              />
+            </label>
+          </div>
           {/* Identity Fields */}
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">

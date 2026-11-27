@@ -3,6 +3,7 @@ import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import {
   collection,
   doc,
+  getDoc,
   onSnapshot,
   orderBy,
   query,
@@ -39,6 +40,7 @@ import {
   X,
 } from 'lucide-react';
 import { auth, db, handleFirestoreError, OperationType, testConnection } from './firebase';
+import { importGoogleAvatar } from './lib/cloudinary';
 import { useCollaborationSocket } from './hooks/useCollaborationSocket';
 import { I18N, isValidLocale, loadSavedLocale, saveLocale, UI_LOCALE_OPTIONS } from './lib/i18n';
 import {
@@ -329,12 +331,19 @@ function HelpdeskShell() {
         const uid = firebaseUser.uid;
         const profileRef = doc(db, 'users', uid, 'public', 'profile');
         try {
+          // Ne jamais écraser une photo déjà enregistrée (ex. envoyée sur Cloudinary)
+          const existing = await getDoc(profileRef).catch(() => null);
+          const hasAvatar = Boolean(existing?.exists() && existing.data()?.avatarUrl);
+          let avatarToStore: string | null = null;
+          if (!hasAvatar && firebaseUser.photoURL) {
+            avatarToStore = (await importGoogleAvatar(firebaseUser.photoURL)) ?? firebaseUser.photoURL;
+          }
           await setDoc(profileRef, {
             uid,
             displayName: (firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Agent Support').slice(0, 120),
             role: 'supervisor',
             department: 'Centre Support & Opérations',
-            ...(firebaseUser.photoURL ? { avatarUrl: firebaseUser.photoURL.slice(0, 500) } : {}),
+            ...(avatarToStore ? { avatarUrl: avatarToStore.slice(0, 500) } : {}),
             updatedAt: serverTimestamp(),
           }, { merge: true });
           await setDoc(doc(db, 'users', uid, 'private', 'info'), {

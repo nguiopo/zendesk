@@ -232,7 +232,7 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'ticketId', 'authorName', 'authorRole', 'visibility', 'eventType',
-          'body', 'ownerId', 'memberIds', 'createdAt'
+          'body', 'ownerId', 'memberIds', 'createdAt', 'attachments'
         ]) &&
         data.ticketId is string && data.ticketId == ticketId &&
         data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
@@ -241,6 +241,8 @@ service cloud.firestore {
         data.eventType in ['reply', 'note', 'status_change', 'ai_triage', 'call_log', 'password_unlock', 'macro', 'merge_split'] &&
         data.body is string && data.body.size() >= 1 && data.body.size() <= 4000 &&
         isValidId(data.ownerId) &&
+        (!('attachments' in data) || (data.attachments is list && data.attachments.size() <= 5 &&
+          (data.attachments.size() == 0 || (data.attachments[0].url is string && data.attachments[0].url.size() <= 500)))) &&
         isValidMemberIds(data.memberIds) &&
         data.createdAt == request.time;
     }
@@ -623,7 +625,7 @@ service cloud.firestore {
         data.keys().hasOnly([
           'title', 'fileName', 'fileSizeBytes', 'pageCount', 'category', 'language',
           'tags', 'extractedText', 'agentNotes', 'readingProgressPct', 'lastReadPage',
-          'kbContributionStatus', 'linkedKbArticleId', 'linkedKbArticleTitle',
+          'kbContributionStatus', 'linkedKbArticleId', 'linkedKbArticleTitle', 'fileUrl', 'filePublicId',
           'uploadedBy', 'ownerId', 'memberIds', 'createdAt', 'updatedAt'
         ]) &&
         data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
@@ -642,6 +644,8 @@ service cloud.firestore {
         (!('linkedKbArticleTitle' in data) || (data.linkedKbArticleTitle is string && data.linkedKbArticleTitle.size() <= 200)) &&
         data.uploadedBy is string && data.uploadedBy.size() >= 1 && data.uploadedBy.size() <= 120 &&
         isValidId(data.ownerId) &&
+        (!('fileUrl' in data) || (data.fileUrl is string && data.fileUrl.size() <= 500)) &&
+        (!('filePublicId' in data) || (data.filePublicId is string && data.filePublicId.size() <= 300)) &&
         isValidMemberIds(data.memberIds) &&
         data.createdAt is timestamp &&
         data.updatedAt == request.time;
@@ -1154,7 +1158,7 @@ service cloud.firestore {
           (isWorkspaceMember(existing()) && incoming().diff(existing()).affectedKeys().hasOnly([
             'title', 'category', 'language', 'tags', 'extractedText', 'agentNotes',
             'readingProgressPct', 'lastReadPage', 'kbContributionStatus',
-            'linkedKbArticleId', 'linkedKbArticleTitle', 'updatedAt'
+            'linkedKbArticleId', 'linkedKbArticleTitle', 'fileUrl', 'filePublicId', 'updatedAt'
           ]))
         );
       allow delete: if isValidId(docId) && isSignedIn() && (existing().ownerId == request.auth.uid || isAdmin());

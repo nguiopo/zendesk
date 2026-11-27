@@ -50,6 +50,7 @@ import {
   splitExtractedTextByPages,
   triggerBlobDownload,
 } from '../lib/pdfLibrary';
+import { fetchRemoteBlob, uploadToCloudinary } from '../lib/cloudinary';
 
 interface KbPdfLibraryPanelProps {
   uid: string;
@@ -158,7 +159,9 @@ export const KbPdfLibraryPanel: React.FC<KbPdfLibraryPanelProps> = ({
     setKbDraftError(null);
 
     let cancelled = false;
-    getPdfBlobLocal(activeDoc.id).then((blob) => {
+    getPdfBlobLocal(activeDoc.id)
+      .then(async (blob) => blob ?? (activeDoc.fileUrl ? await fetchRemoteBlob(activeDoc.fileUrl) : null))
+      .then((blob) => {
       if (cancelled) return;
       setLocalPdfBlob(blob);
       if (!blob && readerViewMode === 'visual') {
@@ -215,7 +218,16 @@ export const KbPdfLibraryPanel: React.FC<KbPdfLibraryPanelProps> = ({
       const extracted = await extractPdfContent(file);
       const baseTitle = file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim() || 'Document technique PDF';
 
+      // Sauvegarde du fichier sur Cloudinary (en cas d'échec, on garde la copie locale du navigateur)
+      let remote: { url: string; publicId: string } | null = null;
+      try {
+        remote = await uploadToCloudinary(file, 'kb-pdfs', file.name);
+      } catch (cloudErr) {
+        console.warn('Cloudinary indisponible, copie locale uniquement:', cloudErr);
+      }
+
       const docRef = await addDoc(collection(db, 'kbPdfDocuments'), {
+        ...(remote ? { fileUrl: remote.url, filePublicId: remote.publicId } : {}),
         title: clampString(baseTitle, 200),
         fileName: clampString(file.name, 240),
         fileSizeBytes: Math.max(0, Math.round(file.size)),
@@ -267,6 +279,16 @@ export const KbPdfLibraryPanel: React.FC<KbPdfLibraryPanelProps> = ({
     await savePdfBlobLocal(activeDoc.id, file);
     setLocalPdfBlob(file);
     setReaderViewMode('visual');
+    try {
+      const remote = await uploadToCloudinary(file, 'kb-pdfs', file.name);
+      await updateDoc(doc(db, 'kbPdfDocuments', activeDoc.id), {
+        fileUrl: remote.url,
+        filePublicId: remote.publicId,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (cloudErr) {
+      console.warn('Cloudinary indisponible, copie locale uniquement:', cloudErr);
+    }
   };
 
   const handleChangePage = async (nextPage: number) => {

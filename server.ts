@@ -7,27 +7,14 @@ import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
-import { GoogleGenAI, Type } from '@google/genai';
+import { getAiClient, Type } from './aiClient';
+import firebaseConfig from './firebase-applet-config.json';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
 
-function getGeminiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY manquante dans les secrets du serveur.');
-  }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-}
 
 interface PresenceState {
   clientId: string;
@@ -82,6 +69,104 @@ function registerRoutes() {
 
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ ok: true, timestamp: new Date().toISOString() });
+  });
+
+  // --- Cloudinary : signature d'upload (le secret API reste côté serveur) ---
+  // Seul un utilisateur Firebase connecté peut obtenir une signature.
+  async function verifyFirebaseUser(req: Request): Promise<boolean> {
+    const header = String(req.headers.authorization || '');
+    const idToken = header.startsWith('Bearer ') ? header.slice(7) : '';
+    if (!idToken) return false;
+    try {
+      const r = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+        }
+      );
+      return r.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  // Copie une photo Google (compte de connexion) vers Cloudinary.
+  app.post('/api/uploads/import-avatar', async (req: Request, res: Response) => {
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    if (!cloudName || !apiKey || !apiSecret) {
+      res.status(500).json({ error: 'Cloudinary non configuré sur le serveur.' });
+      return;
+    }
+    if (!(await verifyFirebaseUser(req))) {
+      res.status(401).json({ error: 'Authentification requise.' });
+      return;
+    }
+    let source: URL;
+    try {
+      source = new URL(String(req.body?.url || ''));
+    } catch {
+      res.status(400).json({ error: 'URL invalide.' });
+      return;
+    }
+    // Liste blanche stricte : uniquement les images de profil Google (évite le SSRF)
+    if (source.protocol !== 'https:' || !/(^|.)googleusercontent.com$/i.test(source.hostname)) {
+      res.status(400).json({ error: 'Source non autorisée.' });
+      return;
+    }
+    const timestamp = Math.floor(Date.now() / 1000);
+    const folder = 'zentradesk/avatars';
+    const signature = crypto
+      .createHash('sha1')
+      .update(`folder=${folder}&timestamp=${timestamp}${apiSecret}`)
+      .digest('hex');
+    const form = new URLSearchParams({
+      file: source.toString(),
+      api_key: apiKey,
+      timestamp: String(timestamp),
+      signature,
+      folder,
+    });
+    try {
+      const r = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+        method: 'POST',
+        body: form,
+      });
+      const data = (await r.json()) as { secure_url?: string; public_id?: string; error?: { message?: string } };
+      if (!r.ok) {
+        res.status(502).json({ error: data.error?.message || 'Import Cloudinary échoué.' });
+        return;
+      }
+      res.json({ url: data.secure_url, publicId: data.public_id });
+    } catch {
+      res.status(502).json({ error: 'Import Cloudinary échoué.' });
+    }
+  });
+
+  app.post('/api/uploads/sign', async (req: Request, res: Response) => {
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    if (!cloudName || !apiKey || !apiSecret) {
+      res.status(500).json({ error: 'Cloudinary non configuré sur le serveur.' });
+      return;
+    }
+    if (!(await verifyFirebaseUser(req))) {
+      res.status(401).json({ error: 'Authentification requise.' });
+      return;
+    }
+    const allowedFolders = ['kb-pdfs', 'ticket-attachments', 'avatars'];
+    const folder = allowedFolders.includes(String(req.body?.folder))
+      ? String(req.body.folder)
+      : 'kb-pdfs';
+    const timestamp = Math.floor(Date.now() / 1000);
+    // Paramètres signés, triés par ordre alphabétique
+    const toSign = `folder=zentradesk/${folder}&timestamp=${timestamp}`;
+    const signature = crypto.createHash('sha1').update(toSign + apiSecret).digest('hex');
+    res.json({ cloudName, apiKey, timestamp, signature, folder: `zentradesk/${folder}` });
   });
 
   // SSRF-safe Webhook Test Dispatch Endpoint (CRM / ERP / Jira)
@@ -226,7 +311,7 @@ function registerRoutes() {
           : 'RÈGLE SENTIMENT IA : Évalue le sentiment client sans modifier automatiquement la priorité.',
       ].join('\n');
 
-      const ai = getGeminiClient();
+      const ai = getAiClient();
       const prompt = `Tu es le moteur de Smart Routing d'une plateforme Helpdesk française (ZentraDesk).
 Analyse la demande client suivante et détermine le routage optimal, la priorité SLA, le niveau de sentiment, le risque de problème technique récurrent et un brouillon de réponse en français.
 
@@ -254,7 +339,7 @@ Choisis la priorité exacte parmi :
 "critical", "high", "medium", "low"`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'openai',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -359,7 +444,7 @@ Choisis la priorité exacte parmi :
 
       res.json(parsed);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erreur lors du routage IA Gemini.';
+      const message = err instanceof Error ? err.message : 'Erreur lors du routage IA.';
       console.error('AI Triage Error:', message);
       res.status(500).json({ error: message });
     }
@@ -385,7 +470,7 @@ Choisis la priorité exacte parmi :
         return;
       }
 
-      const ai = getGeminiClient();
+      const ai = getAiClient();
       const targetLangLabel =
         locale === 'en' ? 'anglais' : locale === 'es' ? 'espagnol' : 'français';
 
@@ -464,7 +549,7 @@ Consignes strictes:
 - Retourne dans "rationale" une phrase courte résumant ce que la réponse adresse.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'openai',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -511,9 +596,9 @@ Consignes strictes:
         return;
       }
 
-      const ai = getGeminiClient();
+      const ai = getAiClient();
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'openai',
         contents: `Tu es analyste opérationnel Support Client. À partir des données réelles ci-dessous, produis un diagnostic exécutif concis en français structuré en 3 volets :
 1. Points de vigilance SLA & incidents récurrents
 2. Capacité de l'équipe (appels, hors zone, déblocages mot de passe, utilisation plateforme)
@@ -557,7 +642,7 @@ ${JSON.stringify(metricsSummary, null, 2)}`,
         return;
       }
 
-      const ai = getGeminiClient();
+      const ai = getAiClient();
       const convoText = messages
         .slice(-10)
         .map((m: Record<string, unknown>) => `${m.sender === 'user' ? 'Client' : 'Assistant IA'}: ${String(m.text || '').slice(0, 800)}`)
@@ -587,7 +672,7 @@ Conversation en cours:
 ${convoText}`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'openai',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -649,7 +734,7 @@ ${convoText}`;
         return;
       }
 
-      const ai = getGeminiClient();
+      const ai = getAiClient();
       const timeline = Array.isArray(events)
         ? events
             .slice(-8)
@@ -683,7 +768,7 @@ Articles KB pertinents:
 ${kbContext || 'Aucun article lié.'}`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'openai',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -712,7 +797,7 @@ ${kbContext || 'Aucun article lié.'}`;
     }
   });
 
-  // AI Route 6: Dedicated Ticket Conversation Summary via Gemini API
+  // AI Route 6: Dedicated Ticket Conversation Summary via OpenAI API
   app.post('/api/ai/summarize-conversation', async (req: Request, res: Response) => {
     try {
       const { ticket, events } = req.body ?? {};
@@ -721,7 +806,7 @@ ${kbContext || 'Aucun article lié.'}`;
         return;
       }
 
-      const ai = getGeminiClient();
+      const ai = getAiClient();
       const conversationLines = Array.isArray(events)
         ? events
             .slice(-25)
@@ -745,7 +830,7 @@ Fil de conversation complet:
 ${conversationLines || 'Aucun message supplémentaire après la demande initiale.'}`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'openai',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -772,7 +857,7 @@ ${conversationLines || 'Aucun message supplémentaire après la demande initiale
       });
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Erreur lors de la génération du résumé IA Gemini.';
+        err instanceof Error ? err.message : 'Erreur lors de la génération du résumé IA.';
       console.error('AI Summary Error:', message);
       res.status(500).json({ error: message });
     }
@@ -790,7 +875,7 @@ ${conversationLines || 'Aucun message supplémentaire après la demande initiale
         return;
       }
 
-      const ai = getGeminiClient();
+      const ai = getAiClient();
       const targetLangLabel =
         language === 'en' ? 'anglais' : language === 'es' ? 'espagnol' : 'français';
 
@@ -813,7 +898,7 @@ Consignes :
 - Propose 3 à 5 mots-clés pertinents (sans #).`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'openai',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -859,7 +944,7 @@ Consignes :
         return;
       }
 
-      const ai = getGeminiClient();
+      const ai = getAiClient();
       const eventsText = Array.isArray(recentEvents)
         ? recentEvents
             .slice(-8)
@@ -890,7 +975,7 @@ Classe le niveau exact parmi:
 Fournis un libellé court (aiSentiment <= 50 caractères en ${langLabel}, ex: "Frustré — Échange tendu", "Pressé — Contrainte délai", "Neutre", "Constructif") et un score de tension de 0 à 100.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-4-hydrogen',
+        model: 'openai',
         contents: prompt,
         config: {
           responseMimeType: 'application/json',
@@ -914,7 +999,7 @@ Fournis un libellé court (aiSentiment <= 50 caractères en ${langLabel}, ex: "F
       res.json(parsed);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Erreur lors de l’analyse de sentiment Gemini.';
+        err instanceof Error ? err.message : 'Erreur lors de l’analyse de sentiment IA.';
       console.error('AI Sentiment Error:', message);
       res.status(500).json({ error: message });
     }

@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
+import { uploadToCloudinary } from '../lib/cloudinary';
 import {
   AgentAvailability,
   AppLocale,
@@ -117,6 +118,9 @@ export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
   const [showAgentModal, setShowAgentModal] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [agentName, setAgentName] = useState('');
+  const [agentAvatarUrl, setAgentAvatarUrl] = useState('');
+  const [uploadingAgentAvatar, setUploadingAgentAvatar] = useState(false);
+  const [agentAvatarError, setAgentAvatarError] = useState<string | null>(null);
   const [agentRoleTitle, setAgentRoleTitle] = useState('Agent Support');
   const [agentGroup, setAgentGroup] = useState<SupportGroup>('N1 Accès & Comptes');
   const [agentAvailability, setAgentAvailability] = useState<AgentAvailability>('available');
@@ -513,6 +517,8 @@ export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
   const resetAgentForm = () => {
     setEditingAgentId(null);
     setAgentName('');
+    setAgentAvatarUrl('');
+    setAgentAvatarError(null);
     setAgentRoleTitle('Agent Support');
     setAgentGroup('N1 Accès & Comptes');
     setAgentAvailability('available');
@@ -524,12 +530,36 @@ export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
   const openEditAgent = (agent: SupportAgent) => {
     setEditingAgentId(agent.id);
     setAgentName(agent.name);
+    setAgentAvatarUrl(agent.avatarUrl || '');
+    setAgentAvatarError(null);
     setAgentRoleTitle(agent.roleTitle);
     setAgentGroup(agent.group);
     setAgentAvailability(agent.availability);
     setAgentMaxTickets(agent.maxConcurrentTickets || 8);
     setAgentSkills(agent.skills || '');
     setShowAgentModal(true);
+  };
+
+  // Photo du membre : fichier sur Cloudinary, lien enregistré dans Firestore à la sauvegarde
+  const handleAgentAvatarFile = async (file: File) => {
+    setAgentAvatarError(null);
+    if (!file.type.startsWith('image/')) {
+      setAgentAvatarError('Veuillez choisir une image (JPG, PNG, WebP...).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setAgentAvatarError('L’image dépasse 5 Mo.');
+      return;
+    }
+    setUploadingAgentAvatar(true);
+    try {
+      const up = await uploadToCloudinary(file, 'avatars', file.name);
+      setAgentAvatarUrl(up.url.slice(0, 500));
+    } catch (err) {
+      setAgentAvatarError(err instanceof Error ? err.message : 'Impossible d’envoyer la photo.');
+    } finally {
+      setUploadingAgentAvatar(false);
+    }
   };
 
   const handleSaveAgent = async (e: React.FormEvent) => {
@@ -554,6 +584,7 @@ export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
         slaCompliancePct: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.slaCompliancePct || 100 : 100,
         csatScore: editingAgentId ? agents.find((a) => a.id === editingAgentId)?.csatScore || 4.5 : 4.5,
         skills: clampString(agentSkills, 300),
+        ...(agentAvatarUrl ? { avatarUrl: agentAvatarUrl.slice(0, 500) } : {}),
         ownerId: uid,
         memberIds: [uid],
         updatedAt: serverTimestamp(),
@@ -1506,6 +1537,18 @@ export const IntegrationsAdminView: React.FC<IntegrationsAdminViewProps> = ({
               <button type="button" onClick={() => setShowAgentModal(false)} className="cursor-pointer"><X className="w-4 h-4 text-slate-500" /></button>
             </div>
             <form onSubmit={handleSaveAgent} className="space-y-3">
+              <div className="flex items-center gap-3">
+                {agentAvatarUrl ? (
+                  <img src={agentAvatarUrl} alt="Photo du membre" referrerPolicy="no-referrer" className="w-12 h-12 rounded-full object-cover border border-slate-200 dark:border-slate-700" />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400"><UserCog className="w-5 h-5" /></div>
+                )}
+                <label className="inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+                  <span>{uploadingAgentAvatar ? 'Envoi...' : 'Choisir une photo'}</span>
+                  <input type="file" accept="image/*" disabled={uploadingAgentAvatar} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void handleAgentAvatarFile(f); }} />
+                </label>
+                {agentAvatarError && <span className="text-xs text-red-600 dark:text-red-400">{agentAvatarError}</span>}
+              </div>
               <label className="block space-y-1"><span className="text-xs font-medium">Nom</span><input required value={agentName} onChange={(e) => setAgentName(e.target.value)} className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg" /></label>
               <label className="block space-y-1"><span className="text-xs font-medium">Rôle</span><input required value={agentRoleTitle} onChange={(e) => setAgentRoleTitle(e.target.value)} className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg" /></label>
               <div className="grid grid-cols-2 gap-3">

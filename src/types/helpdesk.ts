@@ -155,6 +155,7 @@ export interface TicketEvent {
   visibility: 'public' | 'internal';
   eventType: 'reply' | 'note' | 'status_change' | 'ai_triage' | 'call_log' | 'password_unlock' | 'macro' | 'merge_split';
   body: string;
+  attachments?: Array<{ name: string; url: string; publicId: string; bytes: number }>;
   ownerId: string;
   memberIds: string[];
   createdAt?: Timestamp;
@@ -584,6 +585,8 @@ export interface KbPdfDocument {
   kbContributionStatus: KbPdfContributionStatus;
   linkedKbArticleId?: string;
   linkedKbArticleTitle?: string;
+  fileUrl?: string;
+  filePublicId?: string;
   uploadedBy: string;
   ownerId: string;
   memberIds: string[];
